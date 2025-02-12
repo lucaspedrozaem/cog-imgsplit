@@ -1,0 +1,15 @@
+build:
+  python_version: "3.9"
+  system_packages:
+    - "ffmpeg"             # Ensure ffmpeg is installed for MoviePy
+    - "libgl1-mesa-glx"    # For image processing (if needed)
+  python_packages:
+    - fastapi
+    - uvicorn
+    - moviepy==1.0.3
+    - librosa
+    - numpy
+    - requests
+    - pillow
+    - opencv-python
+predict: "predict.py:Predictor"
