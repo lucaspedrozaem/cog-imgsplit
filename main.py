@@ -70,38 +70,121 @@ def get_font_path() -> str:
     else:
         return ""  # If empty, Pillow will fall back to a default font
 
-def create_caption_clip(text: str, duration: float, target_width: int, pos) -> mpe.VideoClip:
-    """Create a caption clip (an ImageClip) with white text and a black stroke that fades in."""
-    fontsize = 50
-    stroke_width = 2
-    font_path = get_font_path()
-    font = ImageFont.truetype(font_path, fontsize) if font_path else ImageFont.load_default()
-    
-    # Use textbbox to compute text dimensions.
-    dummy_img = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(dummy_img)
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    
-    padding = 20
+def create_caption_clip(
+    text: str,
+    duration: float,
+    video_size: tuple[int, int],
+    position: str = "bottom-center",
+    # Text modifications
+    uppercase: bool = False,
+    font_path: str = None,  # e.g. "./fonts/Roboto-Regular.ttf"
+    font_size: int = 50,
+    text_color: str = "#FFFFFF",
+    # Stroke (outline)
+    stroke_size: int = 0,
+    stroke_color: str = "#000000",
+    # Background box
+    background_on: bool = True,
+    background_opacity: float = 0.5,
+    # Appearance
+    padding: int = 20,
+    fadein_duration: float = 0.5
+) -> mpe.ImageClip:
+    """
+    Create a caption ImageClip with customizable text, stroke, background box,
+    and position. The clip is crossfaded in over `fadein_duration`.
+    """
+
+    if uppercase:
+        text = text.upper()
+
+    # Load custom font if specified, else fallback
+    if font_path:
+        font = ImageFont.truetype(font_path, font_size)
+    else:
+        font = ImageFont.load_default()
+
+    # Measure the text's bounding box relative to (0,0).
+    # x0,y0 can be negative or positive depending on the font metrics.
+    dummy_img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+    draw_dummy = ImageDraw.Draw(dummy_img)
+    x0, y0, x1, y1 = draw_dummy.textbbox((0, 0), text, font=font)
+    text_width = x1 - x0
+    text_height = y1 - y0
+
+    # Determine total image size = text size + 2*padding
     img_width = text_width + 2 * padding
     img_height = text_height + 2 * padding
+
+    # Create the final caption image
     image = Image.new("RGBA", (img_width, img_height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    # Draw black stroke.
-    for dx in range(-stroke_width, stroke_width+1):
-        for dy in range(-stroke_width, stroke_width+1):
-            draw.text((padding+dx, padding+dy), text, font=font, fill="black")
-    # Draw white text.
-    draw.text((padding, padding), text, font=font, fill="white")
-    
-    temp_image_path = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+
+    # If background is on, draw a semi-transparent rectangle
+    if background_on:
+        bg_color = (0, 0, 0, int(background_opacity * 255))
+        draw.rectangle([(0, 0), (img_width, img_height)], fill=bg_color)
+
+    # Compute offset to truly center the text bounding box
+    offset_x = (img_width - text_width) / 2 - x0
+    offset_y = (img_height - text_height) / 2 - y0
+
+    # Draw stroke by offsetting text in a small grid
+    if stroke_size > 0:
+        for dx in range(-stroke_size, stroke_size + 1):
+            for dy in range(-stroke_size, stroke_size + 1):
+                draw.text(
+                    (offset_x + dx, offset_y + dy),
+                    text,
+                    font=font,
+                    fill=stroke_color
+                )
+
+    # Draw the main text on top
+    draw.text((offset_x, offset_y), text, font=font, fill=text_color)
+
+    # Save to a temporary file so we can load it as a MoviePy ImageClip
+    temp_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
     image.save(temp_image_path)
-    
-    caption_clip = mpe.ImageClip(temp_image_path).set_duration(duration)
-    caption_clip = caption_clip.crossfadein(0.5)
+
+    # Create a MoviePy ImageClip
+    caption_clip = ImageClip(temp_image_path).set_duration(duration)
+    # Optionally fade in
+    caption_clip = caption_clip.crossfadein(fadein_duration)
+
+    # Now we compute the final (x, y) position as a static tuple
+    # rather than passing a lambda. This avoids the numpy.float64 error.
+    W, H = video_size
+    clip_w, clip_h = caption_clip.size
+    margin = 20
+
+    # A small helper function that returns (x, y) for each position
+    def calc_position(pos: str):
+        if pos == "top-left":
+            return (margin, margin)
+        elif pos == "top-center":
+            return ((W - clip_w) // 2, margin)
+        elif pos == "top-right":
+            return (W - clip_w - margin, margin)
+        elif pos == "bottom-left":
+            return (margin, H - clip_h - margin)
+        elif pos == "bottom-center":
+            return ((W - clip_w) // 2, H - clip_h - margin)
+        elif pos == "bottom-right":
+            return (W - clip_w - margin, H - clip_h - margin)
+        elif pos == "middle":
+            return ((W - clip_w) // 2, (H - clip_h) // 2)
+        else:
+            # default to bottom-center
+            return ((W - clip_w) // 2, H - clip_h - margin)
+
+    final_xy = calc_position(position)
+
+    # Set that static position
+    caption_clip = caption_clip.set_position(final_xy)
+
     return caption_clip
+
 
 def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.VideoClip:
     """Apply a Ken Burns effect (slow zoom and horizontal pan) to an ImageClip."""
@@ -152,19 +235,72 @@ def sync_videos_to_song(video_info: list, song_file: str, output_file: str,
     
     print("Downloading input files...")
     downloaded_inputs = []
+    # for video in video_info:
+    #     if isinstance(video, dict):
+    #         url = video.get("url")
+    #         caption = video.get("caption")
+    #     else:
+    #         url = video
+    #         caption = None
+    #     try:
+    #         local_path = download_file(url)
+    #         downloaded_inputs.append((local_path, caption))
+    #         print(f"Downloaded {url} -> {local_path}")
+    #     except Exception as e:
+    #         print(f"Failed to download {url}: {e}")
+
+    POSSIBLE_POSITIONS = [
+    "top-left", "top-center", "top-right",
+    "bottom-left", "bottom-center", "bottom-right",
+    "middle"
+    ]
+
+    # Example default font path if none is provided
+    DEFAULT_FONT_PATH = "dejavu-sans-bold.ttf"
+
     for video in video_info:
         if isinstance(video, dict):
             url = video.get("url")
             caption = video.get("caption")
+
+            # Retrieve extra design variables from the dictionary.
+            # If missing, use defaults (or random choice for position).
+            position          = video.get("position", random.choice(POSSIBLE_POSITIONS))
+            uppercase         = video.get("uppercase", True)
+            font_path         = video.get("font_path", DEFAULT_FONT_PATH)
+            font_size         = video.get("font_size", 50)
+            text_color        = video.get("text_color", "#FFFFFF")
+            stroke_size       = video.get("stroke_size", 10)
+            stroke_color      = video.get("stroke_color", "#000000")
+            background_on     = video.get("background_on", True)
+            background_opacity= video.get("background_opacity", 0.5)
+            fadein_duration   = video.get("fadein_duration", 0.5)
+
         else:
+            # If 'video' is just a string, assume it's the URL.
             url = video
             caption = None
+
+            # Use default design parameters in this scenario
+            position          = random.choice(POSSIBLE_POSITIONS)
+            uppercase         = True
+            font_path         = DEFAULT_FONT_PATH
+            font_size         = 50
+            text_color        = "#FFFFFF"
+            stroke_size       = 10
+            stroke_color      = "#000000"
+            background_on     = True
+            background_opacity= 0.5
+            fadein_duration   = 0.5
+
         try:
             local_path = download_file(url)
             downloaded_inputs.append((local_path, caption))
             print(f"Downloaded {url} -> {local_path}")
         except Exception as e:
             print(f"Failed to download {url}: {e}")
+
+
     if not downloaded_inputs:
         raise ValueError("No inputs were successfully downloaded.")
     
@@ -234,11 +370,29 @@ def sync_videos_to_song(video_info: list, song_file: str, output_file: str,
         speed_factor = orig_duration / target_duration
         clip = clip.fx(vfx.speedx, speed_factor)
         clip = clip.set_duration(target_duration)
+
         if caption:
-            pos = random.choice([("left", "bottom"), ("right", "bottom")])
-            caption_clip = create_caption_clip(caption, target_duration, target_resolution[0], pos)
-            caption_clip = caption_clip.set_position(pos)
+
+            #pos = random.choice([ "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right", "middle" ])
+            
+            caption_clip = create_caption_clip(
+                text=caption,
+                duration=target_duration,
+                video_size=(target_resolution[0],target_resolution[1]),
+                position=position,
+                uppercase=uppercase,
+                font_path=font_path,
+                font_size=font_size,
+                text_color=text_color,
+                stroke_size=stroke_size,
+                stroke_color=stroke_color,
+                background_on=background_on,
+                background_opacity=background_opacity,
+                fadein_duration=fadein_duration
+            )
+
             clip = mpe.CompositeVideoClip([clip, caption_clip])
+
         video_clips.append(clip)
     
     final_video = mpe.concatenate_videoclips(video_clips, method="compose")
