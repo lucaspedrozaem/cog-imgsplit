@@ -148,7 +148,7 @@ def create_caption_clip(
     image.save(temp_image_path)
 
     # Create a MoviePy ImageClip
-    caption_clip = ImageClip(temp_image_path).set_duration(duration)
+    caption_clip = mpe.ImageClip(temp_image_path).set_duration(duration)
     # Optionally fade in
     caption_clip = caption_clip.crossfadein(fadein_duration)
 
