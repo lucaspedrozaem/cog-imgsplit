@@ -134,6 +134,9 @@ def create_caption_clip(
     offset_x = (img_width - text_width) / 2 - x0
     offset_y = (img_height - text_height) / 2 - y0
 
+    vertical_shift = 5
+    offset_y += vertical_shift
+
     # Draw stroke by offsetting text in a small grid
     if stroke_size > 0:
         for dx in range(-stroke_size, stroke_size + 1):
@@ -436,7 +439,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, output_
     ]
 
     # Example default font path if none is provided
-    DEFAULT_FONT_PATH = "dejavu-sans-bold.ttf"
+    DEFAULT_FONT_PATH = "/fonts/Montserrat-VariableFont_wght.ttf"
 
     for video in video_info:
         if isinstance(video, dict):
