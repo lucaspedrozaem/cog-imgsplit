@@ -212,58 +212,77 @@ def create_caption_clip(
 #     return image_clip.fl(ken_burns, apply_to=['mask', 'video'])
 
 
+def smoothstep(u):
+    """Smoothstep easing function for u in [0,1]."""
+    return 3*u**2 - 2*u**3
 
 def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.VideoClip:
-    """Apply a Ken Burns effect (slow zoom and pan) to an ImageClip using subpixel extraction.
+    """
+    Apply a simple Ken Burns effect (one zoom+pan transition) using subpixel-accurate extraction.
     
-    The effect includes:
-      - A randomized zoom range (1.3 to 1.5)
-      - A horizontal or vertical pan with randomized direction
+    - Starts at (zoom=1.0, offset=0)
+    - Ends at (zoom=Z, offsetX) with a guaranteed visible movement
+    - Uses smoothstep interpolation to avoid abrupt changes
+    - Clamps the crop so it never goes out of bounds
     """
     w, h = image_clip.size
 
-    # Choose a random final zoom factor (between 1.3 and 1.5 for a stronger effect).
-    final_zoom = random.uniform(1.3, 1.5)
+    # Pick a stronger final zoom (e.g. 1.2 to 1.4) to ensure a noticeable effect
+    final_zoom = 1.3  # Fixed for a clear result; feel free to randomize (e.g. random.uniform(1.2, 1.4))
 
-    # Randomly decide if we should pan horizontally or vertically.
-    pan_direction = random.choice(["horizontal", "vertical"])
-    pan_sign = random.choice([-1, 1])  # Randomize movement direction.
+    # Choose a noticeable horizontal offset (e.g., 20% of image width)
+    # Positive = pan to the right, negative = pan to the left
+    offsetX = 0.2 * w  # e.g., 20% of width
+    # Try negative if you prefer leftward: offsetX = -0.2 * w
+    
+    # We'll define exactly 2 key states, so there's just one phase
+    key_states = [
+        (1.0, 0.0),       # start: full view, no offset
+        (final_zoom, offsetX)  # end: zoomed and horizontally offset
+    ]
+    
+    n_phases = 1
+    # Just one phase = entire duration
+    durations = [duration]
+    total_effect_duration = duration
+    
+    # Set the clip duration
+    image_clip = image_clip.set_duration(total_effect_duration)
+    boundaries = [0, total_effect_duration]
 
-    def ken_burns(get_frame, t):
-        # Compute zoom factor (linearly increasing over duration)
-        zoom = 1.0 + (final_zoom - 1.0) * (t / duration)
+    def advanced_effect(get_frame, t):
+        # Because there's only 1 phase, the logic is straightforward
+        phase_index = 0
+        t_phase = t - boundaries[phase_index]
+        u = t_phase / durations[phase_index]
+        u = max(0, min(u, 1))
+        u_eased = smoothstep(u)
 
-        # Compute crop dimensions (float) based on zoom.
-        crop_w = w / zoom
-        crop_h = h / zoom
+        # Interpolate between (1.0, 0.0) and (final_zoom, offsetX)
+        start_zoom, start_offset = key_states[0]
+        end_zoom, end_offset = key_states[1]
+        current_zoom = start_zoom + (end_zoom - start_zoom) * u_eased
+        current_offset = start_offset + (end_offset - start_offset) * u_eased
 
-        # Determine max offset to ensure crop stays within image.
-        max_offset_x = (w - crop_w) / 2.0
-        max_offset_y = (h - crop_h) / 2.0
-
-        # Compute pan effect based on the chosen direction.
-        if pan_direction == "horizontal":
-            offset_x = pan_sign * max_offset_x * (t / duration)  # Moves left/right
-            offset_y = 0
-        else:
-            offset_x = 0
-            offset_y = pan_sign * max_offset_y * (t / duration)  # Moves up/down
-
-        # Compute center of the crop.
-        center_x = w / 2.0 + offset_x
-        center_y = h / 2.0 + offset_y
-
-        # Ensure the crop stays within the image bounds.
-        center_x = max(crop_w / 2.0, min(center_x, w - crop_w / 2.0))
-        center_y = max(crop_h / 2.0, min(center_y, h - crop_h / 2.0))
-
-        # Extract subpixel-accurate crop.
+        # Compute the crop size (float) from the current zoom
+        crop_w = w / current_zoom
+        crop_h = h / current_zoom
+        
+        # Center of the crop; shift horizontally by current_offset
+        center_x = (w / 2) + current_offset
+        center_y = h / 2
+        
+        # Clamp so the crop remains fully within the image
+        center_x = max(crop_w/2, min(center_x, w - crop_w/2))
+        center_y = max(crop_h/2, min(center_y, h - crop_h/2))
+        
+        # Subpixel extraction to avoid jitter
         patch = cv2.getRectSubPix(get_frame(t), (int(round(crop_w)), int(round(crop_h))), (center_x, center_y))
-        # Resize back to original dimensions.
         resized = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
         return resized
 
-    return image_clip.fl(ken_burns, apply_to=['mask', 'video'])
+    return image_clip.fl(advanced_effect, apply_to=['mask', 'video'])
+
 
 
 def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, output_file: str,
