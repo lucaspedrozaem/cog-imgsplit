@@ -218,18 +218,18 @@ def smoothstep(u):
 
 def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.VideoClip:
     """
-    Apply a continuous pan/zoom effect to an ImageClip (like a randomized Ken Burns),
-    using subpixel extraction to avoid jitter.
+    A Ken Burns-style effect that randomly selects a sequence of zoom/pan states
+    and distributes 'duration' among them. If 'duration' is too short to give each
+    phase the official 'phase_min' duration, we simply compress the phases so the
+    total is still 'duration'.
     
-    - If 'duration' < 6 seconds, we pick a short (two-phase) sequence.
-    - Otherwise, we pick a multi-phase sequence at random.
-    - If a transition involves pan or zoom-out, we force the preceding state to be zoomed in.
-    - If two consecutive offsets have the same sign, we invert the second one so pans alternate direction.
-    - We clamp the crop rectangle so it always stays within the original image.
+    - If duration < 6, pick a short 2-phase sequence.
+    - Otherwise, pick one of several multi-phase sequences at random.
+    - We enforce safe transitions (never pan or zoom out from full view),
+      flip consecutive pans that go in the same direction, and use subpixel
+      cropping to avoid jitter.
     """
-
-    # For clarity, we treat `phase_min` and `phase_max` as fixed constants.
-    phase_min, phase_max = 2, 3
+    phase_min, phase_max = 2, 3  # official range, but we'll override if too short
     w, h = image_clip.size
 
     # Use a stronger zoom range for a noticeable effect.
@@ -245,15 +245,15 @@ def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.Vi
     # For pre-slide at full view, use a smaller offset.
     pre_max = max(5, 0.05 * w)
 
-    # Depending on 'duration', pick either a short or long sequence of key states.
+    # ----------------------
+    # 1) Pick a sequence
+    # ----------------------
     if duration < 6:
-        # Short video: only two-phase sequences.
+        # Short video: two-phase sequences.
         short_sequences = []
-        # SS1: (1.0, 0) → (Z, 0) → (1.0, 0)
         ss1 = [(1.0, 0.0), (Z, 0.0), (1.0, 0.0)]
         short_sequences.append(ss1)
 
-        # SS2: (1.0, 0) → (Z, offset) → (1.0, 0)
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
             offset = -offset
@@ -262,22 +262,18 @@ def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.Vi
 
         key_states = random.choice(short_sequences)
     else:
-        # Longer video: choose from multiple sequences.
+        # Long video: multiple possible sequences.
         long_sequences = []
-
-        # Sequence A: (1.0,0) → (Z,0) → (Z,offset) → (1.0,0)
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
             offset = -offset
         seqA = [(1.0, 0.0), (Z, 0.0), (Z, offset), (1.0, 0.0)]
         long_sequences.append(seqA)
 
-        # Sequence B: (1.0,0) → (1.0,pre) → (Z,pre) → (1.0,0)
         pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
         seqB = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset), (1.0, 0.0)]
         long_sequences.append(seqB)
 
-        # Sequence C: (1.0,0) → (1.0,pre) → (Z,pre) → (Z,offset) → (1.0,0)
         pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
@@ -285,76 +281,71 @@ def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.Vi
         seqC = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset), (Z, offset), (1.0, 0.0)]
         long_sequences.append(seqC)
 
-        # Sequence D: (1.0,0) → (Z,0) → (Z,offset1) → (Z,offset2) → (1.0,0)
         offset1 = random.uniform(slide_offset_min, slide_offset_max) * random.choice([-1, 1])
         offset2 = random.uniform(slide_offset_min, slide_offset_max) * random.choice([-1, 1])
         seqD = [(1.0, 0.0), (Z, 0.0), (Z, offset1), (Z, offset2), (1.0, 0.0)]
         long_sequences.append(seqD)
 
-        # Sequence E: (1.0,0) → (1.0,pre) → (Z,pre) → (Z,offset) → (Z,pre) → (1.0,0)
         pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
             offset = -offset
-        seqE = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset), (Z, offset), (Z, pre_offset), (1.0, 0.0)]
+        seqE = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset),
+                (Z, offset), (Z, pre_offset), (1.0, 0.0)]
         long_sequences.append(seqE)
 
         key_states = random.choice(long_sequences)
 
-    # --- Enforce safe transitions for pan/zoom-out ---
+    # ----------------------
+    # 2) Safe transitions
+    # ----------------------
     for i in range(1, len(key_states)):
         next_zoom, next_offset = key_states[i]
         if next_zoom == 1.0 or next_offset != 0:
             prev_zoom, prev_offset = key_states[i-1]
             if prev_zoom == 1.0:
-                # Force the preceding state to be zoomed in
                 key_states[i-1] = (Z, prev_offset)
 
-    # --- Ensure consecutive pans alternate direction ---
+    # Alternate consecutive pans
     for i in range(1, len(key_states)):
         prev_offset = key_states[i-1][1]
         cur_offset = key_states[i][1]
         if prev_offset != 0 and cur_offset != 0:
             if (prev_offset > 0 and cur_offset > 0) or (prev_offset < 0 and cur_offset < 0):
-                # Invert the second offset
                 key_states[i] = (key_states[i][0], -cur_offset)
 
-    # Number of phases = number of states - 1
+    # ----------------------
+    # 3) Phase durations
+    # ----------------------
     n_phases = len(key_states) - 1
 
-    # Compute durations for each phase
-    phase_durations = []
-    phase_min = 2
-    phase_max = 3
+    # If duration is smaller than the "official" minimum, just compress everything
+    required_min = phase_min * n_phases
+    if duration < required_min:
+        # We'll just share 'duration' equally among all phases
+        phase_durations = [duration / n_phases] * n_phases
+        total_duration = duration
+    else:
+        # Distribute 'extra = duration - required_min' via Dirichlet among phases
+        extra = duration - required_min
+        partition = np.random.dirichlet(np.ones(n_phases)) * extra
+        phase_durations = [phase_min + part for part in partition]
+        total_duration = sum(phase_durations)
 
-    if duration < (phase_min * n_phases):
-        raise ValueError(
-            f"Duration {duration:.1f}s is too short for {n_phases} phases "
-            f"(needs at least {phase_min * n_phases:.1f}s)."
-        )
-
-    # Distribute 'duration' among phases using a Dirichlet approach
-    extra = duration - (phase_min * n_phases)
-    # Randomly partition `extra` among phases, then add `phase_min` to each
-    partition = np.random.dirichlet(np.ones(n_phases)) * extra
-    for i in range(n_phases):
-        phase_durations.append(phase_min + partition[i])
-
-    total_duration = sum(phase_durations)
     print("Key States (zoom, offset):", key_states)
     print("Phase durations:", ["{:.2f}".format(d) for d in phase_durations])
     print("Total effect duration: {:.2f} seconds".format(total_duration))
 
-    # Set the clip duration
     image_clip = image_clip.set_duration(total_duration)
-
-    # Precompute boundaries for each phase
     boundaries = [0]
     for d in phase_durations:
         boundaries.append(boundaries[-1] + d)
 
+    # ----------------------
+    # 4) The effect
+    # ----------------------
     def ken_burns(get_frame, t):
-        # Identify the current phase
+        # Identify current phase
         for i in range(n_phases):
             if boundaries[i] <= t < boundaries[i+1]:
                 phase_index = i
@@ -364,33 +355,29 @@ def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.Vi
 
         t_phase = t - boundaries[phase_index]
         u = t_phase / phase_durations[phase_index]
-        u = max(0, min(u, 1))
+        u = max(0, min(u, 1))  # clamp
         u_eased = smoothstep(u)
 
-        # Interpolate between states for the current phase
         start_zoom, start_offset = key_states[phase_index]
         end_zoom, end_offset = key_states[phase_index+1]
         current_zoom = start_zoom + (end_zoom - start_zoom) * u_eased
         current_offset = start_offset + (end_offset - start_offset) * u_eased
 
-        # Compute subpixel crop size
+        # Compute subpixel crop
         crop_w = w / current_zoom
         crop_h = h / current_zoom
 
-        # Center = midpoint + horizontal offset
-        center_x = (w / 2) + current_offset
-        center_y = h / 2
+        center_x = w/2 + current_offset
+        center_y = h/2
 
-        # Clamp so the crop remains within image boundaries
-        center_x = max(crop_w / 2, min(center_x, w - crop_w / 2))
-        center_y = max(crop_h / 2, min(center_y, h - crop_h / 2))
+        # clamp
+        center_x = max(crop_w/2, min(center_x, w - crop_w/2))
+        center_y = max(crop_h/2, min(center_y, h - crop_h/2))
 
-        # Extract subpixel patch
-        patch = cv2.getRectSubPix(get_frame(t),
+        frame = get_frame(t)
+        patch = cv2.getRectSubPix(frame,
                                   (int(round(crop_w)), int(round(crop_h))),
                                   (center_x, center_y))
-
-        # Resize to original
         resized = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
         return resized
 
