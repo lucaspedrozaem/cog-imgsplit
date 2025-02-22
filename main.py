@@ -638,8 +638,9 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, output_
         output_file,
         codec="libx264",
         audio_codec="aac",
+        fps=24,
         temp_audiofile="temp-audio.m4a",
-        remove_temp=True
+        remove_temp=True,
     )
     for temp_file, _ in downloaded_inputs:
         try:
