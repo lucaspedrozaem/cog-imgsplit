@@ -86,6 +86,7 @@ def create_caption_clip(
     # Background box
     background_on: bool = True,
     background_opacity: float = 0.5,
+    border_radius: int=10,
     # Appearance
     padding: int = 20,
     fadein_duration: float = 0.5
@@ -104,28 +105,32 @@ def create_caption_clip(
     else:
         font = ImageFont.load_default()
 
-    # Measure the text's bounding box relative to (0,0).
-    # x0,y0 can be negative or positive depending on the font metrics.
+    # Measure the text's bounding box relative to (0,0)
     dummy_img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
     draw_dummy = ImageDraw.Draw(dummy_img)
     x0, y0, x1, y1 = draw_dummy.textbbox((0, 0), text, font=font)
+
     text_width = x1 - x0
     text_height = y1 - y0
 
-    # Determine total image size = text size + 2*padding
+    # Determine total image size (text size + padding)
     img_width = text_width + 2 * padding
     img_height = text_height + 2 * padding
 
-    # Create the final caption image
+    # Create the final image
     image = Image.new("RGBA", (img_width, img_height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
 
-    # If background is on, draw a semi-transparent rectangle
+    # Draw background (rounded rectangle)
     if background_on:
-        bg_color = (0, 0, 0, int(background_opacity * 255))
-        draw.rectangle([(0, 0), (img_width, img_height)], fill=bg_color)
+        bg_color = (0, 0, 0, int(background_opacity * 255))  # Semi-transparent black
+        draw.rounded_rectangle(
+            [(0, 0), (img_width, img_height)],
+            fill=bg_color,
+            radius=border_radius
+        )
 
-    # Compute offset to truly center the text bounding box
+    # Compute offsets to center text
     offset_x = (img_width - text_width) / 2 - x0
     offset_y = (img_height - text_height) / 2 - y0
 
@@ -140,12 +145,13 @@ def create_caption_clip(
                     fill=stroke_color
                 )
 
-    # Draw the main text on top
+    # Draw main text
     draw.text((offset_x, offset_y), text, font=font, fill=text_color)
 
     # Save to a temporary file so we can load it as a MoviePy ImageClip
     temp_image_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
     image.save(temp_image_path)
+
 
     # Create a MoviePy ImageClip
     caption_clip = mpe.ImageClip(temp_image_path).set_duration(duration)
@@ -186,26 +192,68 @@ def create_caption_clip(
     return caption_clip
 
 
+# def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.VideoClip:
+#     """Apply a Ken Burns effect (slow zoom and horizontal pan) to an ImageClip."""
+#     w, h = image_clip.size
+#     def ken_burns(get_frame, t):
+#         zoom = 1 + 0.2 * (t / duration)
+#         new_w, new_h = int(w / zoom), int(h / zoom)
+#         max_offset = (w - new_w) // 2
+#         offset_x = int(max_offset * (2 * t / duration - 1))
+#         offset_y = 0
+#         x1 = max(0, (w - new_w) // 2 + offset_x)
+#         y1 = max(0, (h - new_h) // 2 + offset_y)
+#         x2 = x1 + new_w
+#         y2 = y1 + new_h
+#         frame = get_frame(t)
+#         cropped = frame[y1:y2, x1:x2]
+#         resized = cv2.resize(cropped, (w, h))
+#         return resized
+#     return image_clip.fl(ken_burns, apply_to=['mask', 'video'])
+
+
+
 def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.VideoClip:
-    """Apply a Ken Burns effect (slow zoom and horizontal pan) to an ImageClip."""
+    """Apply a Ken Burns effect (slow zoom and horizontal pan) to an ImageClip
+    using subpixel extraction to avoid jitter.
+    
+    The effect linearly zooms in from 1.0 to 1.2 over the duration, while panning
+    horizontally from left to right.
+    """
     w, h = image_clip.size
+
     def ken_burns(get_frame, t):
-        zoom = 1 + 0.2 * (t / duration)
-        new_w, new_h = int(w / zoom), int(h / zoom)
-        max_offset = (w - new_w) // 2
-        offset_x = int(max_offset * (2 * t / duration - 1))
-        offset_y = 0
-        x1 = max(0, (w - new_w) // 2 + offset_x)
-        y1 = max(0, (h - new_h) // 2 + offset_y)
-        x2 = x1 + new_w
-        y2 = y1 + new_h
-        frame = get_frame(t)
-        cropped = frame[y1:y2, x1:x2]
-        resized = cv2.resize(cropped, (w, h))
+        # Compute zoom factor (linearly from 1.0 to 1.2)
+        zoom = 1.0 + 0.2 * (t / duration)
+        
+        # Compute crop dimensions (as float) from the current zoom.
+        crop_w = w / zoom
+        crop_h = h / zoom
+        
+        # Determine maximum horizontal offset such that the crop remains inside the image.
+        max_offset = (w - crop_w) / 2.0
+        # Horizontal pan: moves from -max_offset to +max_offset over the duration.
+        offset_x = max_offset * (2 * t / duration - 1)
+        offset_y = 0  # No vertical pan
+        
+        # Compute the desired center of the crop.
+        center_x = w / 2.0 + offset_x
+        center_y = h / 2.0 + offset_y
+        
+        # Clamp the center so that the entire crop rectangle is within the image bounds.
+        center_x = max(crop_w / 2.0, min(center_x, w - crop_w / 2.0))
+        center_y = max(crop_h / 2.0, min(center_y, h - crop_h / 2.0))
+        
+        # Use subpixel extraction to obtain the crop with the exact dimensions.
+        patch = cv2.getRectSubPix(get_frame(t), (int(round(crop_w)), int(round(crop_h))), (center_x, center_y))
+        # Resize the extracted patch back to the original image size.
+        resized = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
         return resized
+
     return image_clip.fl(ken_burns, apply_to=['mask', 'video'])
 
-def sync_videos_to_song(video_info: list, song_file: str, output_file: str,
+
+def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, output_file: str,
                         loop_count: int = 1, aspect_ratio: str = "16:9",
                         target_resolution: tuple = None):
     """
@@ -271,9 +319,11 @@ def sync_videos_to_song(video_info: list, song_file: str, output_file: str,
             font_size         = video.get("font_size", 50)
             text_color        = video.get("text_color", "#FFFFFF")
             stroke_size       = video.get("stroke_size", 10)
+            border_radius     = video.get("border_radius", 10)
             stroke_color      = video.get("stroke_color", "#000000")
             background_on     = video.get("background_on", True)
             background_opacity= video.get("background_opacity", 0.5)
+            slowdown          = video.get("slowdown", 1.0)
             fadein_duration   = video.get("fadein_duration", 0.5)
 
         else:
@@ -291,6 +341,8 @@ def sync_videos_to_song(video_info: list, song_file: str, output_file: str,
             stroke_color      = "#000000"
             background_on     = True
             background_opacity= 0.5
+            border_radius     = 10
+            slowdown = 1.0
             fadein_duration   = 0.5
 
         try:
@@ -307,50 +359,94 @@ def sync_videos_to_song(video_info: list, song_file: str, output_file: str,
     all_inputs = downloaded_inputs * loop_count
     allowed_segments = len(all_inputs)
     
-    # Beat detection using librosa.
-    y, sr = librosa.load(song_file, sr=None)
+    # 1) Optionally trim up to 10s before the global peak.
+    trim = do_trim  # or False
+
+    # --- A) Find the global peak in the entire audio.
+    y_full, sr_full = librosa.load(song_file, sr=None)
+    onset_env_full = librosa.onset.onset_strength(y=y_full, sr=sr_full)
+    times_env_full = librosa.times_like(onset_env_full, sr=sr_full)
+
+    idx_peak_full = np.argmax(onset_env_full)
+    peak_time_full = times_env_full[idx_peak_full]
+    peak_intensity_full = onset_env_full[idx_peak_full]
+    print(f"Global peak at {peak_time_full:.2f}s, intensity={peak_intensity_full:.2f}")
+
+    # --- B) If trim=True, subclip from (peak_time_full - 10) or 0 if negative.
+    if trim:
+        cut_time = max(0, peak_time_full - 10)
+        print(f"Trimming audio from {cut_time:.2f}s onward.")
+        song_audio = mpe.AudioFileClip(song_file).subclip(cut_time, None)
+        sub_duration = song_audio.duration
+
+        # Reload that portion for beat detection.
+        y, sr = librosa.load(song_file, sr=None, offset=cut_time, duration=sub_duration)
+    else:
+        print("No trimming; using entire track from 0s.")
+        cut_time = 0
+        song_audio = mpe.AudioFileClip(song_file)
+        sub_duration = song_audio.duration
+        y, sr = y_full, sr_full
+
+    # 2) Beat detection on the chosen portion (trimmed or full).
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
     beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+
+    # Compute onset env in the chosen portion.
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
     times_env = librosa.times_like(onset_env, sr=sr)
     threshold = np.median(onset_env) + np.std(onset_env)
-    good_indices = np.where(onset_env > threshold)[0]
-    if good_indices.size > 0:
-        first_good_time = times_env[good_indices[0]]
-        print(f"First good moment detected at {first_good_time:.2f}s")
-        beat_times = beat_times[beat_times >= first_good_time]
-    else:
-        print("No significant onset detected; using all beat times.")
-    
-    if beat_times.size == 0:
-        raise ValueError("No beats detected after the first good moment; check the song file.")
-    
-    song_audio = mpe.AudioFileClip(song_file)
-    song_duration = song_audio.duration
-    if song_duration - beat_times[-1] > 0.5:
-        beat_times = np.append(beat_times, song_duration)
-    
+
+    # 3) Filter only good beats in [0..sub_duration].
+    good_beats = []
+    for bt in beat_times:
+        idx_bt = np.argmin(np.abs(times_env - bt))
+        if onset_env[idx_bt] > threshold:
+            good_beats.append(bt)
+    good_beats = np.array(good_beats)
+    if good_beats.size == 0:
+        raise ValueError("No good beats detected in the chosen audio.")
+
+    # Append final boundary if leftover >0.5
+    if sub_duration - good_beats[-1] > 0.5:
+        good_beats = np.append(good_beats, sub_duration)
+
     print(f"Detected tempo: {float(tempo):.2f} BPM")
-    print("Beat times:", beat_times)
-    
+    print("Good beat times (in subclip timeline):", good_beats)
+
+    # 4) Decide an 'ideal_dur' for uniform segments in [3..5].
+    ideal_dur = random.uniform(3, 5)
+    print(f"Ideal segment duration: {ideal_dur:.2f}s")
+
+    # 5) Create segments so each segment is ~ideal_dur, 
+    #    using good beats for boundaries. We stop if we reach allowed_segments.
     segments = []
     i = 0
-    while i < len(beat_times) - 1 and len(segments) < allowed_segments:
-        start_time = beat_times[i]
-        target_dur = random.uniform(3, 5)
+    while i < len(good_beats) - 1 and len(segments) < allowed_segments:
+        start_time = good_beats[i]
+        end_goal = start_time + ideal_dur
+
+        # Find the first beat >= end_goal
         j = i + 1
-        while j < len(beat_times) and (beat_times[j] - start_time) < target_dur:
+        while j < len(good_beats) and good_beats[j] < end_goal:
             j += 1
-        if j < len(beat_times):
-            if (beat_times[j] - start_time) <= 5 or (j - 1) == i:
-                end_time = beat_times[j]
-            else:
-                end_time = beat_times[j - 1]
+        if j < len(good_beats):
+            end_time = good_beats[j]
+            seg_dur = end_time - start_time
+            # If seg_dur <3, try next beat if available
+            if seg_dur < 3 and j+1 < len(good_beats):
+                end_time = good_beats[j+1]
+                j += 1
+            segments.append((start_time, end_time))
+            i = j
         else:
-            end_time = beat_times[-1]
-        segments.append((start_time, end_time))
-        i = j
+            # leftover
+            if i < len(good_beats) - 1:
+                segments.append((start_time, good_beats[-1]))
+            break
+
     print("Segments (start, end):", segments)
+
     
     video_clips = []
     for idx, (seg_start, seg_end) in enumerate(segments):
@@ -367,7 +463,10 @@ def sync_videos_to_song(video_info: list, song_file: str, output_file: str,
         clip = crop_to_aspect(clip, desired_ratio)
         clip = zoom_to_fill(clip, target_resolution)
         orig_duration = clip.duration
-        speed_factor = orig_duration / target_duration
+        #speed_factor = orig_duration / target_duration
+        # Define slow_factor between 0 and 1 (1 = normal speed, 0.5 = half speed, etc.)
+        slow_factor = slowdown  # Adjust this value (e.g., 0.5 for 50% speed)
+        speed_factor = (orig_duration / target_duration) * slow_factor
         clip = clip.fx(vfx.speedx, speed_factor)
         clip = clip.set_duration(target_duration)
 
@@ -388,6 +487,8 @@ def sync_videos_to_song(video_info: list, song_file: str, output_file: str,
                 stroke_color=stroke_color,
                 background_on=background_on,
                 background_opacity=background_opacity,
+                border_radius=border_radius,
+                padding=10,
                 fadein_duration=fadein_duration
             )
 

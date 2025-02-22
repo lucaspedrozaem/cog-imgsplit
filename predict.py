@@ -27,6 +27,9 @@ class Predictor(BasePredictor):
             description="Output aspect ratio (e.g. '16:9' or '9:16').",
             default="16:9"
         ),
+        do_trim: bool = Input(
+            description="Trim long song", default=False
+        ),
         target_resolution: str = Input(
             description="Output resolution in WIDTHxHEIGHT format (e.g. '1920x1080').",
             default="1920x1080"
@@ -55,6 +58,7 @@ class Predictor(BasePredictor):
         sync_videos_to_song(
             video_info_parsed,
             song_file_path,
+            do_trim,
             output_file,
             loop_count=loop_count,
             aspect_ratio=aspect_ratio,
