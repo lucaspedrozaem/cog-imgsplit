@@ -214,39 +214,52 @@ def create_caption_clip(
 
 
 def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.VideoClip:
-    """Apply a Ken Burns effect (slow zoom and horizontal pan) to an ImageClip
-    using subpixel extraction to avoid jitter.
+    """Apply a Ken Burns effect (slow zoom and pan) to an ImageClip using subpixel extraction.
     
-    The effect linearly zooms in from 1.0 to 1.2 over the duration, while panning
-    horizontally from left to right.
+    The effect includes:
+      - A randomized zoom range (1.3 to 1.5)
+      - A horizontal or vertical pan with randomized direction
     """
     w, h = image_clip.size
 
+    # Choose a random final zoom factor (between 1.3 and 1.5 for a stronger effect).
+    final_zoom = random.uniform(1.3, 1.5)
+
+    # Randomly decide if we should pan horizontally or vertically.
+    pan_direction = random.choice(["horizontal", "vertical"])
+    pan_sign = random.choice([-1, 1])  # Randomize movement direction.
+
     def ken_burns(get_frame, t):
-        # Compute zoom factor (linearly from 1.0 to 1.2)
-        zoom = 1.0 + 0.2 * (t / duration)
-        
-        # Compute crop dimensions (as float) from the current zoom.
+        # Compute zoom factor (linearly increasing over duration)
+        zoom = 1.0 + (final_zoom - 1.0) * (t / duration)
+
+        # Compute crop dimensions (float) based on zoom.
         crop_w = w / zoom
         crop_h = h / zoom
-        
-        # Determine maximum horizontal offset such that the crop remains inside the image.
-        max_offset = (w - crop_w) / 2.0
-        # Horizontal pan: moves from -max_offset to +max_offset over the duration.
-        offset_x = max_offset * (2 * t / duration - 1)
-        offset_y = 0  # No vertical pan
-        
-        # Compute the desired center of the crop.
+
+        # Determine max offset to ensure crop stays within image.
+        max_offset_x = (w - crop_w) / 2.0
+        max_offset_y = (h - crop_h) / 2.0
+
+        # Compute pan effect based on the chosen direction.
+        if pan_direction == "horizontal":
+            offset_x = pan_sign * max_offset_x * (t / duration)  # Moves left/right
+            offset_y = 0
+        else:
+            offset_x = 0
+            offset_y = pan_sign * max_offset_y * (t / duration)  # Moves up/down
+
+        # Compute center of the crop.
         center_x = w / 2.0 + offset_x
         center_y = h / 2.0 + offset_y
-        
-        # Clamp the center so that the entire crop rectangle is within the image bounds.
+
+        # Ensure the crop stays within the image bounds.
         center_x = max(crop_w / 2.0, min(center_x, w - crop_w / 2.0))
         center_y = max(crop_h / 2.0, min(center_y, h - crop_h / 2.0))
-        
-        # Use subpixel extraction to obtain the crop with the exact dimensions.
+
+        # Extract subpixel-accurate crop.
         patch = cv2.getRectSubPix(get_frame(t), (int(round(crop_w)), int(round(crop_h))), (center_x, center_y))
-        # Resize the extracted patch back to the original image size.
+        # Resize back to original dimensions.
         resized = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
         return resized
 
@@ -324,6 +337,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, output_
             background_on     = video.get("background_on", True)
             background_opacity= video.get("background_opacity", 0.5)
             slowdown          = video.get("slowdown", 1.0)
+            padding           = video.get("padding", 10)
             fadein_duration   = video.get("fadein_duration", 0.5)
 
         else:
@@ -342,6 +356,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, output_
             background_on     = True
             background_opacity= 0.5
             border_radius     = 10
+            padding           = 10
             slowdown = 1.0
             fadein_duration   = 0.5
 
