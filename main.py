@@ -134,7 +134,7 @@ def create_caption_clip(
     offset_x = (img_width - text_width) / 2 - x0
     offset_y = (img_height - text_height) / 2 - y0
 
-    vertical_shift = 5
+    vertical_shift = 2
     offset_y += vertical_shift
 
     # Draw stroke by offsetting text in a small grid
