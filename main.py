@@ -10,7 +10,6 @@ import numpy as np
 import librosa
 from PIL import Image, ImageDraw, ImageFont
 import moviepy.editor as mpe
-from moviepy.editor import AudioFileClip
 import moviepy.video.fx.all as vfx
 from moviepy.audio.fx.all import audio_loop
 import requests
@@ -648,50 +647,8 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     # 1) Optionally trim up to 10s before the global peak.
     trim = do_trim  # or False
 
-        # 1) Load the audio (optionally do your peak-based trim here)
-    original_audio = AudioFileClip(song_file)
-    
-    # 2) Compute how many inputs you have
-    num_inputs = len(video_info)
-    
-    # 3) Estimate the minimal needed audio length
-    needed_duration = num_inputs * 5
-    
-    # 4) If the audio is too short, loop it first
-    if original_audio.duration <= needed_duration:
-        print(f"Audio is too short ({original_audio.duration:.2f}s). Looping it to {needed_duration:.2f}s.")
-        # Loop it so it's at least 'needed_duration'
-        extended_audio = audio_loop(original_audio, duration=needed_duration)
-    else:
-        extended_audio = original_audio
-    
-    # 5) Now do your beat detection on 'extended_audio'
-    #    (librosa needs a file or raw data. If you have a local file path, 
-    #     you can just load the original file multiple times. 
-    #     If you absolutely need to run librosa on the extended version,
-    #     you'd have to write extended_audio to a temporary file first,
-    #     or do an in-memory approach. 
-    #     For simplicity, let's do normal detection on the original 
-    #     or just skip beat detection if that complicates matters.)
-
-    # We'll demonstrate a simpler approach: let's do beat detection on the extended audio 
-    # by writing it to a temp file. (Optional, depends on your exact workflow.)
-    import tempfile
-    import os
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
-        # Write extended_audio to WAV
-        temp_filepath = temp_wav.name
-    extended_audio.write_audiofile(temp_filepath, fps=44100, nbytes=2, codec='pcm_s16le')
-    
-    # 6) Load that WAV with librosa for beat detection
-    y_full, sr_full = librosa.load(temp_filepath, sr=None)
-    os.remove(temp_filepath)  # clean up
-
-
-
     # --- A) Find the global peak in the entire audio.
-    #y_full, sr_full = librosa.load(song_file, sr=None)
+    y_full, sr_full = librosa.load(song_file, sr=None)
     onset_env_full = librosa.onset.onset_strength(y=y_full, sr=sr_full)
     times_env_full = librosa.times_like(onset_env_full, sr=sr_full)
 
@@ -700,31 +657,21 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     peak_intensity_full = onset_env_full[idx_peak_full]
     print(f"Global peak at {peak_time_full:.2f}s, intensity={peak_intensity_full:.2f}")
 
-    # -----------------------------------------------------------
-    # STEP 5) Optionally trim the extended audio around the peak
-    # -----------------------------------------------------------
-    if do_trim:
+    # --- B) If trim=True, subclip from (peak_time_full - 10) or 0 if negative.
+    if trim:
         cut_time = max(0, peak_time_full - 10)
-        print(f"Trimming extended audio from {cut_time:.2f}s onward.")
-        extended_audio = extended_audio.subclip(cut_time)  # from cut_time to end
-        sub_duration = extended_audio.duration
+        print(f"Trimming audio from {cut_time:.2f}s onward.")
+        song_audio = mpe.AudioFileClip(song_file).subclip(cut_time, None)
+        sub_duration = song_audio.duration
+
+        # Reload that portion for beat detection.
+        y, sr = librosa.load(song_file, sr=None, offset=cut_time, duration=sub_duration)
     else:
-        print("No trimming; using entire extended audio from 0s.")
-        sub_duration = extended_audio.duration
-
-    final_audio_duration = extended_audio.duration
-    print(f"Final audio duration after optional trim: {final_audio_duration:.2f}s")
-
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav2:
-        tmp_path2 = temp_wav2.name
-    extended_audio.write_audiofile(tmp_path2, fps=44100, nbytes=2, codec='pcm_s16le')
-
-    # -----------------------------------------------------------
-    # STEP 7) Load that WAV for final beat detection
-    # -----------------------------------------------------------
-    y, sr = librosa.load(tmp_path2, sr=None)
-    os.remove(tmp_path2)
+        print("No trimming; using entire track from 0s.")
+        cut_time = 0
+        song_audio = mpe.AudioFileClip(song_file)
+        sub_duration = song_audio.duration
+        y, sr = y_full, sr_full
 
     # 2) Beat detection on the chosen portion (trimmed or full).
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
@@ -838,7 +785,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     final_video = mpe.concatenate_videoclips(video_clips, method="compose")
     final_duration = final_video.duration
 
-    song_dur = extended_audio.duration
+    song_dur = song_audio.duration
 
     print(f"Final video duration: {final_duration:.6f}")
     print(f"Song audio duration:  {song_dur:.6f}")
@@ -846,10 +793,10 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
 
     if final_duration <= song_dur:
         # If the final video is shorter or equal to the song, we just subclip.
-        final_audio = extended_audio.subclip(0, final_duration)
+        final_audio = song_audio.subclip(0, final_duration)
     else:
         # If the final video is longer, we loop the audio until it matches.
-        looped_audio = audio_loop(extended_audio, duration=final_duration)
+        looped_audio = audio_loop(song_audio, duration=final_duration)
         final_audio = looped_audio.subclip(0, final_duration)
 
     final_video = final_video.set_audio(final_audio)
