@@ -231,7 +231,7 @@ def smoothstep(u: float) -> float:
     return 3*u**2 - 2*u**3
 
 def apply_ken_burns_effect(
-    image_clip: ImageClip,
+    image_clip: mpe.ImageClip,
     duration: float,
     start_hold: float = 0.5,
     intensity_min: float = 1.2,
