@@ -10,6 +10,7 @@ import numpy as np
 import librosa
 from PIL import Image, ImageDraw, ImageFont
 import moviepy.editor as mpe
+from moviepy.editor import AudioFileClip
 import moviepy.video.fx.all as vfx
 from moviepy.audio.fx.all import audio_loop
 import requests
