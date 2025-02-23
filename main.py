@@ -707,8 +707,10 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
         cut_time = max(0, peak_time_full - 10)
         print(f"Trimming extended audio from {cut_time:.2f}s onward.")
         extended_audio = extended_audio.subclip(cut_time)  # from cut_time to end
+        sub_duration = extended_audio.duration
     else:
         print("No trimming; using entire extended audio from 0s.")
+        sub_duration = extended_audio.duration
 
     final_audio_duration = extended_audio.duration
     print(f"Final audio duration after optional trim: {final_audio_duration:.2f}s")
