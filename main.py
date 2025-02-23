@@ -647,8 +647,50 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     # 1) Optionally trim up to 10s before the global peak.
     trim = do_trim  # or False
 
+        # 1) Load the audio (optionally do your peak-based trim here)
+    original_audio = AudioFileClip(song_file)
+    
+    # 2) Compute how many inputs you have
+    num_inputs = len(video_info)
+    
+    # 3) Estimate the minimal needed audio length
+    needed_duration = num_inputs * 5
+    
+    # 4) If the audio is too short, loop it first
+    if original_audio.duration <= needed_duration:
+        print(f"Audio is too short ({original_audio.duration:.2f}s). Looping it to {needed_duration:.2f}s.")
+        # Loop it so it's at least 'needed_duration'
+        extended_audio = audio_loop(original_audio, duration=needed_duration)
+    else:
+        extended_audio = original_audio
+    
+    # 5) Now do your beat detection on 'extended_audio'
+    #    (librosa needs a file or raw data. If you have a local file path, 
+    #     you can just load the original file multiple times. 
+    #     If you absolutely need to run librosa on the extended version,
+    #     you'd have to write extended_audio to a temporary file first,
+    #     or do an in-memory approach. 
+    #     For simplicity, let's do normal detection on the original 
+    #     or just skip beat detection if that complicates matters.)
+
+    # We'll demonstrate a simpler approach: let's do beat detection on the extended audio 
+    # by writing it to a temp file. (Optional, depends on your exact workflow.)
+    import tempfile
+    import os
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
+        # Write extended_audio to WAV
+        temp_filepath = temp_wav.name
+    extended_audio.write_audiofile(temp_filepath, fps=44100, nbytes=2, codec='pcm_s16le')
+    
+    # 6) Load that WAV with librosa for beat detection
+    y, sr = librosa.load(temp_filepath, sr=None)
+    os.remove(temp_filepath)  # clean up
+
+
+
     # --- A) Find the global peak in the entire audio.
-    y_full, sr_full = librosa.load(song_file, sr=None)
+    #y_full, sr_full = librosa.load(song_file, sr=None)
     onset_env_full = librosa.onset.onset_strength(y=y_full, sr=sr_full)
     times_env_full = librosa.times_like(onset_env_full, sr=sr_full)
 
