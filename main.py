@@ -485,7 +485,7 @@ def apply_ken_burns_effect(
 
 
 
-def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, output_file: str,
+def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_hold: float, output_file: str,
                         loop_count: int = 1, aspect_ratio: str = "16:9",
                         target_resolution: tuple = None):
     """
@@ -542,7 +542,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, output_
         if isinstance(video, dict):
             url = video.get("url")
             caption = video.get("caption")
-            effect_hold = video.get("effect_hold")
+            
 
             # Retrieve extra design variables from the dictionary.
             # If missing, use defaults (or random choice for position).
@@ -582,7 +582,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, output_
             slowdown = 1.0
             fadein_duration   = 0.5
             hex_color         = "#000000"
-            effect_hold = 0.5
+           
 
         try:
             local_path = download_file(url)
