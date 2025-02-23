@@ -236,7 +236,7 @@ def apply_ken_burns_effect(
     start_hold: float = 0.5,
     intensity_min: float = 1.2,
     intensity_max: float = 1.4,
-) -> VideoClip:
+) -> mpe.VideoClip:
     """
     A Ken Burns-style effect that chooses a sequence of zoom/pan states
     and smooth-transitions between them over 'duration' seconds.
