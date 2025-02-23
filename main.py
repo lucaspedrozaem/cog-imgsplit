@@ -424,6 +424,11 @@ def apply_ken_burns_effect(
         small_zoom = z_last + 0.05 if abs(z_last - 1.0) < 0.01 else z_last + 0.02
         key_states[-1] = (small_zoom, off_last)
 
+    
+    print("Debug: Final key states:")
+    for idx, state in enumerate(key_states):
+        print(f"  State {idx}: Zoom = {state[0]:.3f}, Offset = {state[1]:.3f}")
+
     # ----------------------
     # 6) Compute phase durations
     # ----------------------
