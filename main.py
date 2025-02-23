@@ -11,6 +11,7 @@ import librosa
 from PIL import Image, ImageDraw, ImageFont
 import moviepy.editor as mpe
 import moviepy.video.fx.all as vfx
+from moviepy.audio.fx.all import audio_loop
 import requests
 
 def download_file(url: str) -> str:
@@ -369,7 +370,7 @@ def apply_ken_burns_effect(
             # If signs differ => product < 0
             if (prev_offset * cur_offset) < 0:
                 # neutralize the second offset to avoid an abrupt flip
-                key_states[i] = (key_states[i][0], 0)
+                key_states[i] = (key_states[i][0], cur_offset * 0.5)
 
     # ----------------------
     # 4) Avoid immediate zoom in->out or out->in
@@ -785,6 +786,10 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     final_duration = final_video.duration
 
     song_dur = song_audio.duration
+
+    print(f"Final video duration: {final_duration:.6f}")
+    print(f"Song audio duration:  {song_dur:.6f}")
+    print(f"Difference (video - song): {final_duration - song_dur:.6f}")
 
     if final_duration <= song_dur:
         # If the final video is shorter or equal to the song, we just subclip.
