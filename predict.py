@@ -30,6 +30,12 @@ class Predictor(BasePredictor):
         do_trim: bool = Input(
             description="Trim long song", default=False
         ),
+        effect_hold: float = Input(
+            description="Hold effect",
+            default=0.5,
+            ge=0,
+            le=1,
+        ),
         target_resolution: str = Input(
             description="Output resolution in WIDTHxHEIGHT format (e.g. '1920x1080').",
             default="1920x1080"
@@ -59,6 +65,7 @@ class Predictor(BasePredictor):
             video_info_parsed,
             song_file_path,
             do_trim,
+            effect_hold,
             output_file,
             loop_count=loop_count,
             aspect_ratio=aspect_ratio,
