@@ -238,7 +238,6 @@ def apply_ken_burns_effect(
     intensity_min: float = 1.2,
     intensity_max: float = 1.4,
 ) -> mpe.VideoClip:
-
     """
     A Ken Burns-style effect that chooses a sequence of zoom/pan states
     and smooth-transitions between them over 'duration' seconds.
@@ -376,7 +375,7 @@ def apply_ken_burns_effect(
         d1 = zoom_direction(z1, z2)
         d2 = zoom_direction(z2, z3)
         if (d1 == "IN" and d2 == "OUT") or (d1 == "OUT" and d2 == "IN"):
-            key_states.pop(i+1)  # remove middle state
+            key_states.pop(i+1)  # remove the middle state
             if i > 0:
                 i -= 1
         else:
@@ -395,7 +394,6 @@ def apply_ken_burns_effect(
                 return True
         return False
 
-    # If there's only 1 state, or if all states are effectively identical, force minimal movement.
     if len(key_states) == 1:
         z, off = key_states[0]
         new_z = z + 0.05 if z == 1.0 else z + 0.02
@@ -405,7 +403,7 @@ def apply_ken_burns_effect(
         small_zoom = z_last + 0.05 if abs(z_last - 1.0) < 0.01 else z_last + 0.02
         key_states[-1] = (small_zoom, off_last)
 
-    # ----- NEW STEP: Remove duplicate consecutive states -----
+    # --- NEW STEP: Remove duplicate consecutive states ---
     filtered_key_states = [key_states[0]]
     for state in key_states[1:]:
         prev = filtered_key_states[-1]
@@ -415,7 +413,17 @@ def apply_ken_burns_effect(
         filtered_key_states.append(state)
     key_states = filtered_key_states
 
-    print("Debug: Final key states after duplicate removal:")
+    # --- NEW STEP: Ensure minimum zoom difference when offsets are zero ---
+    # If both consecutive states have zero offset and the zoom difference is less than 0.2,
+    # force the difference to be exactly 0.2.
+    for i in range(1, len(key_states)):
+        prev_zoom, prev_off = key_states[i-1]
+        curr_zoom, curr_off = key_states[i]
+        if abs(prev_off) < 1e-2 and abs(curr_off) < 1e-2:  # both offsets zero
+            if curr_zoom - prev_zoom < 0.2:
+                key_states[i] = (prev_zoom + 0.2, curr_off)
+
+    print("Debug: Final key states after duplicate removal and zoom adjustment:")
     for idx, state in enumerate(key_states):
         print(f"  State {idx}: Zoom = {state[0]:.3f}, Offset = {state[1]:.3f}")
 
@@ -481,8 +489,8 @@ def apply_ken_burns_effect(
         u_eased = smoothstep(u)
 
         start_zoom, start_offset = key_states[phase_index]
-        end_zoom, end_offset     = key_states[phase_index+1]
-        current_zoom   = start_zoom + (end_zoom - start_zoom) * u_eased
+        end_zoom, end_offset = key_states[phase_index+1]
+        current_zoom = start_zoom + (end_zoom - start_zoom) * u_eased
         current_offset = start_offset + (end_offset - start_offset) * u_eased
 
         crop_w = w / current_zoom
