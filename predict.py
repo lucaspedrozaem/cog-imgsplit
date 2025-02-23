@@ -36,6 +36,18 @@ class Predictor(BasePredictor):
             ge=0,
             le=1,
         ),
+        intensity_min: float = Input(
+            description="Intensity min",
+            default=1.2,
+            ge=0,
+            le=2,
+        ),
+        intensity_max: float = Input(
+            description="Intensity max",
+            default=1.4,
+            ge=0,
+            le=2,
+        ),
         target_resolution: str = Input(
             description="Output resolution in WIDTHxHEIGHT format (e.g. '1920x1080').",
             default="1920x1080"
@@ -66,6 +78,8 @@ class Predictor(BasePredictor):
             song_file_path,
             do_trim,
             effect_hold,
+            intensity_min,
+            intensity_max,
             output_file,
             loop_count=loop_count,
             aspect_ratio=aspect_ratio,

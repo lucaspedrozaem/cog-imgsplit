@@ -224,10 +224,7 @@ def create_caption_clip(
 #     return image_clip.fl(ken_burns, apply_to=['mask', 'video'])
 
 
-import random
-import numpy as np
-import cv2
-from moviepy.editor import VideoClip, ImageClip
+
 
 def smoothstep(u: float) -> float:
     """Smoothstep easing function for u in [0,1]."""
@@ -236,41 +233,49 @@ def smoothstep(u: float) -> float:
 def apply_ken_burns_effect(
     image_clip: ImageClip,
     duration: float,
-    start_hold: float = 0.5
+    start_hold: float = 0.5,
+    intensity_min: float = 1.2,
+    intensity_max: float = 1.4,
 ) -> VideoClip:
     """
-    A Ken Burns-style effect that chooses a sequence of zoom/pan states and
-    smooth-transitions between them over 'duration' seconds.
+    A Ken Burns-style effect that chooses a sequence of zoom/pan states
+    and smooth-transitions between them over 'duration' seconds.
 
-    Features:
-      - If duration < 6, it can randomly pick 2-phase or 1-phase sequences.
-      - For longer durations, it picks from several multi-phase sequences.
-      - Safe transitions ensure we never zoom out from full view directly.
-      - We also try to avoid consecutive pans in the same direction.
-      - We avoid immediate zoom in→out (or out→in) with a post-processing pass.
-      - We optionally reduce the first phase to 'start_hold' seconds,
-        ensuring the effect starts quickly rather than lingering at the start.
+    Main features:
+      - If duration < 6, we randomly pick either a 2-phase or 1-phase
+        sequence (so short clips can have just one movement).
+      - For longer durations, we choose from multiple multi-phase sequences.
+      - We avoid:
+         * Zooming out directly from full view,
+         * Immediate pan direction reversals (e.g., right->left),
+         * Immediate zoom in->out or out->in,
+         * No-op sequences with no actual movement.
+      - We clamp the first phase (if it's long) to 'start_hold' seconds,
+        ensuring the effect starts earlier rather than lingering at full view.
+      - We respect exactly the user-specified `duration` by scaling the
+        internal transition boundaries, so the final clip is `duration` long.
 
-    :param image_clip: MoviePy ImageClip (still image).
+    :param image_clip: a MoviePy ImageClip (still image).
     :param duration: total Ken Burns effect duration in seconds.
-    :param start_hold: how long the first phase can be if it’s an “idle” start,
-                       making the movement begin earlier (defaults to 0.5s).
-    :return: A VideoClip with the Ken Burns effect applied.
+    :param start_hold: max time we allow in the first phase if it is "idle".
+    :return: A VideoClip with the Ken Burns effect applied, guaranteed to
+             have the given 'duration' and some movement.
     """
+
     # ----------------------
-    # 1) Basic setup
+    # 1) Basic Setup
     # ----------------------
-    phase_min = 2
+    phase_min = 2        # Minimum duration for each phase
     w, h = image_clip.size
 
-    # Random zoom factor for the 'interesting' zoom phases.
-    Z = random.uniform(1.2, 1.4)
+    # Random zoom factor for "interesting" states
+    Z = random.uniform(intensity_min, intensity_max)
 
-    # Calculate max horizontal offset for the given zoom.
+    # Calculate maximum horizontal offset for the chosen zoom
     new_w_at_Z = w / Z
     max_possible_offset = (w - new_w_at_Z) / 2.0
 
-    # Offsets for slide (zoomed in)
+    # Offsets for slides when zoomed in
     slide_offset_min = 0.5 * max_possible_offset
     slide_offset_max = max_possible_offset
 
@@ -284,7 +289,7 @@ def apply_ken_burns_effect(
         # Sequences for short videos
         short_sequences = []
 
-        # 2-phase sequence examples (3 key states)
+        # Two-phase sequences (3 key states, i.e. 2 transitions)
         ss1 = [(1.0, 0.0), (Z, 0.0), (1.0, 0.0)]
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
@@ -293,7 +298,7 @@ def apply_ken_burns_effect(
         short_sequences.append(ss1)
         short_sequences.append(ss2)
 
-        # 1-phase sequence (2 key states) - single movement
+        # Single-phase sequence (2 key states, i.e. 1 transition)
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
             offset = -offset
@@ -306,16 +311,19 @@ def apply_ken_burns_effect(
         # Sequences for longer videos
         long_sequences = []
 
+        # Example A
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
             offset = -offset
         seqA = [(1.0, 0.0), (Z, 0.0), (Z, offset), (1.0, 0.0)]
         long_sequences.append(seqA)
 
+        # Example B
         pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
         seqB = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset), (1.0, 0.0)]
         long_sequences.append(seqB)
 
+        # Example C
         pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
@@ -324,11 +332,13 @@ def apply_ken_burns_effect(
                 (Z, offset), (1.0, 0.0)]
         long_sequences.append(seqC)
 
+        # Example D
         offset1 = random.uniform(slide_offset_min, slide_offset_max) * random.choice([-1, 1])
         offset2 = random.uniform(slide_offset_min, slide_offset_max) * random.choice([-1, 1])
         seqD = [(1.0, 0.0), (Z, 0.0), (Z, offset1), (Z, offset2), (1.0, 0.0)]
         long_sequences.append(seqD)
 
+        # Example E
         pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
@@ -340,28 +350,30 @@ def apply_ken_burns_effect(
         key_states = random.choice(long_sequences)
 
     # ----------------------
-    # 3) Safe transitions: never zoom out from full, alternate consecutive pans
+    # 3) Safe transitions
+    #    (3.1) Avoid zoom-out from full view, (3.2) Avoid immediate pan reversal
     # ----------------------
-    # 3.1) Ensure we don't do "full view -> full view" with offset
+    # 3.1) If we see states like (1.0,0)->(1.0,nonzero), force the first to be zoomed
     for i in range(1, len(key_states)):
-        next_zoom, next_offset = key_states[i]
-        if next_zoom == 1.0 or next_offset != 0:
-            prev_zoom, prev_offset = key_states[i-1]
-            if prev_zoom == 1.0:
-                # Force previous to be zoomed to avoid "zoom out from full" or no-op
-                key_states[i-1] = (Z, prev_offset)
+        nz, noff = key_states[i]
+        if nz == 1.0 or noff != 0:
+            pz, poff = key_states[i-1]
+            if pz == 1.0:
+                key_states[i-1] = (Z, poff)
 
-    # 3.2) Alternate consecutive pans
+    # 3.2) Avoid immediate pan direction reversal (R->L or L->R)
     for i in range(1, len(key_states)):
         prev_offset = key_states[i-1][1]
         cur_offset = key_states[i][1]
         if prev_offset != 0 and cur_offset != 0:
-            # If they have the same sign, flip the current
-            if (prev_offset > 0 and cur_offset > 0) or (prev_offset < 0 and cur_offset < 0):
-                key_states[i] = (key_states[i][0], -cur_offset)
+            # If signs differ => product < 0
+            if (prev_offset * cur_offset) < 0:
+                # neutralize the second offset to avoid an abrupt flip
+                key_states[i] = (key_states[i][0], 0)
 
     # ----------------------
-    # 4) Avoid immediate zoom in->out or out->in by merging states
+    # 4) Avoid immediate zoom in->out or out->in
+    #    by removing the middle state
     # ----------------------
     def zoom_direction(z1, z2):
         if z2 > z1: return "IN"
@@ -370,33 +382,59 @@ def apply_ken_burns_effect(
 
     i = 0
     while i < len(key_states) - 2:
-        z1 = key_states[i][0]
-        z2 = key_states[i+1][0]
-        z3 = key_states[i+2][0]
+        z1, _ = key_states[i]
+        z2, _ = key_states[i+1]
+        z3, _ = key_states[i+2]
         d1 = zoom_direction(z1, z2)
         d2 = zoom_direction(z2, z3)
-        # Check for back-to-back "IN -> OUT" or "OUT -> IN"
         if (d1 == "IN" and d2 == "OUT") or (d1 == "OUT" and d2 == "IN"):
-            # Remove the middle state to avoid immediate reversal
-            key_states.pop(i+1)
-            # Step back one index if possible
-            if i > 0: i -= 1
+            key_states.pop(i+1)  # remove middle
+            if i > 0:
+                i -= 1
         else:
             i += 1
 
     # ----------------------
-    # 5) Compute phase durations
+    # 5) Ensure there's at least some difference in states
+    #    (avoid the scenario of all states being identical => no movement)
     # ----------------------
-    # # of phases is one less than # of key states
+    def states_have_movement(kstates):
+        """Check if there's any difference in zoom or offset across these states."""
+        for idx in range(len(kstates) - 1):
+            z1, off1 = kstates[idx]
+            z2, off2 = kstates[idx+1]
+            if abs(z1 - z2) > 1e-3 or abs(off1 - off2) > 1e-2:
+                return True
+        return False
+
+    # If there's only 1 state, or if all states are effectively identical, we force minimal movement.
+    # For example, we forcibly set the second state to a small zoom or offset difference.
+    if len(key_states) == 1:
+        # We have only one state => no transitions. Let's forcibly add a second state.
+        z, off = key_states[0]
+        # e.g. small zoom in
+        new_z = z + 0.05 if z == 1.0 else z + 0.02
+        key_states = [key_states[0], (new_z, off)]
+    elif not states_have_movement(key_states):
+        # All states are basically the same => force a difference in the last state
+        z_first, off_first = key_states[0]
+        z_last, off_last = key_states[-1]
+        # We'll do a small zoom in or a small offset
+        small_zoom = z_last + 0.05 if abs(z_last - 1.0) < 0.01 else z_last + 0.02
+        key_states[-1] = (small_zoom, off_last)
+
+    # ----------------------
+    # 6) Compute phase durations
+    # ----------------------
     n_phases = len(key_states) - 1
     if n_phases <= 0:
-        # Edge case: if there's only 1 state, no transition, just set fixed duration
-        image_clip = image_clip.set_duration(duration)
-        return image_clip
+        # Edge case: still no transitions => forcibly fix again
+        key_states = [(1.0, 0.0), (1.05, 0.0)]
+        n_phases = 1
 
     required_min = phase_min * n_phases
     if duration < required_min:
-        # Compress all phases equally
+        # Not enough total time => compress phases
         phase_durations = [duration / n_phases] * n_phases
         total_duration = duration
     else:
@@ -406,39 +444,44 @@ def apply_ken_burns_effect(
         total_duration = sum(phase_durations)
 
     # ----------------------
-    # 6) Optionally reduce the first phase (start_hold) so effect starts earlier
+    # 7) Optionally reduce the first phase if it's long (start_hold)
     # ----------------------
-    # Only if there's more than 1 phase and the first phase is bigger than start_hold
     if n_phases > 1 and phase_durations[0] > start_hold:
         diff = phase_durations[0] - start_hold
         phase_durations[0] = start_hold
-        # Distribute 'diff' among remaining phases
+        # distribute leftover 'diff' among remaining
         for i in range(1, n_phases):
             phase_durations[i] += diff / (n_phases - 1)
         total_duration = sum(phase_durations)
 
-    # Alternatively, you could remove an initial no-op state:
-    # if len(key_states) > 1 and key_states[0] == key_states[1]:
-    #     key_states.pop(0)
-    #     n_phases = len(key_states) - 1
-    #     # re-compute durations, etc.
-
-    print("Key States (zoom, offset):", key_states)
-    print("Phase durations:", ["{:.2f}".format(d) for d in phase_durations])
-    print("Total effect duration: {:.2f} seconds".format(total_duration))
-
-    image_clip = image_clip.set_duration(total_duration)
-
-    # Prepare phase boundaries
+    # ----------------------
+    # 8) Build boundaries, then scale them to match exactly 'duration'
+    #    so we ensure the final clip is precisely 'duration' seconds
+    # ----------------------
     boundaries = [0]
     for d in phase_durations:
         boundaries.append(boundaries[-1] + d)
 
+    # boundaries[-1] = total_duration, which might be slightly off from 'duration'.
+    # Scale them so boundaries[-1] == duration exactly.
+    if abs(total_duration - duration) > 1e-6:
+        scale = duration / total_duration
+        for i in range(1, len(boundaries)):
+            boundaries[i] *= scale
+        total_duration = duration
+
+    # We will set the clip to exactly 'duration' below
+    print("Final key_states:", key_states)
+    print("Phase durations (before scaling):", ["{:.2f}".format(d) for d in phase_durations])
+    print("Boundaries after scaling:", [f"{b:.2f}" for b in boundaries])
+    print("Final total duration:", total_duration)
+
     # ----------------------
-    # 7) The Ken Burns frame function
+    # 9) Frame function for the Ken Burns effect
     # ----------------------
     def ken_burns(get_frame, t):
-        # 7.1) Identify current phase
+        # Identify which phase we're in
+        phase_index = 0
         for j in range(n_phases):
             if boundaries[j] <= t < boundaries[j+1]:
                 phase_index = j
@@ -446,30 +489,29 @@ def apply_ken_burns_effect(
         else:
             phase_index = n_phases - 1
 
-        # 7.2) Normalized time in [0,1] for this phase
+        # Normalized time in [0,1]
         t_phase = t - boundaries[phase_index]
-        phase_duration = phase_durations[phase_index]
-        u = max(0, min(t_phase / phase_duration, 1))
+        phase_length = boundaries[phase_index+1] - boundaries[phase_index]
+        u = max(0, min(t_phase / phase_length, 1))
         u_eased = smoothstep(u)
 
-        # 7.3) Interpolate zoom & offset
+        # Interpolate zoom & offset
         start_zoom, start_offset = key_states[phase_index]
-        end_zoom, end_offset = key_states[phase_index+1]
-        current_zoom = start_zoom + (end_zoom - start_zoom) * u_eased
+        end_zoom, end_offset     = key_states[phase_index+1]
+        current_zoom   = start_zoom + (end_zoom   - start_zoom)   * u_eased
         current_offset = start_offset + (end_offset - start_offset) * u_eased
 
-        # 7.4) Compute crop
+        # Compute sub-rectangle
         crop_w = w / current_zoom
         crop_h = h / current_zoom
-
         center_x = w / 2 + current_offset
         center_y = h / 2
 
-        # 7.5) Clamp center so we don't go out of bounds
+        # Clamp center so we don't sample out of bounds
         center_x = max(crop_w/2, min(center_x, w - crop_w/2))
         center_y = max(crop_h/2, min(center_y, h - crop_h/2))
 
-        # 7.6) Extract and resize
+        # Extract frame area and resize
         frame = get_frame(t)
         patch = cv2.getRectSubPix(
             frame,
@@ -479,13 +521,16 @@ def apply_ken_burns_effect(
         resized = cv2.resize(patch, (w, h), interpolation=cv2.INTER_LINEAR)
         return resized
 
-    # Apply the custom function
+    # Make a copy of the clip with the final exact duration
+    image_clip = image_clip.set_duration(duration)
+
+    # Apply the per-frame transformation
     return image_clip.fl(ken_burns, apply_to=['mask','video'])
 
 
 
 
-def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_hold: float, output_file: str,
+def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_hold: float, intensity_min: float, intensity_max: float, output_file: str,
                         loop_count: int = 1, aspect_ratio: str = "16:9",
                         target_resolution: tuple = None):
     """
@@ -696,7 +741,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
         print(f"Processing '{local_path}' for segment {idx+1} with target duration {target_duration:.2f}s")
         if local_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
             base_clip = mpe.ImageClip(local_path).set_duration(target_duration)
-            clip = apply_ken_burns_effect(base_clip, target_duration, effect_hold)
+            clip = apply_ken_burns_effect(base_clip, target_duration, effect_hold, intensity_min, intensity_max)
         else:
             clip = mpe.VideoFileClip(local_path).without_audio()
         clip = crop_to_aspect(clip, desired_ratio)
@@ -738,7 +783,17 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     
     final_video = mpe.concatenate_videoclips(video_clips, method="compose")
     final_duration = final_video.duration
-    final_audio = song_audio.subclip(0, final_duration)
+
+    song_dur = song_audio.duration
+
+    if final_duration <= song_dur:
+        # If the final video is shorter or equal to the song, we just subclip.
+        final_audio = song_audio.subclip(0, final_duration)
+    else:
+        # If the final video is longer, we loop the audio until it matches.
+        looped_audio = audio_loop(song_audio, duration=final_duration)
+        final_audio = looped_audio.subclip(0, final_duration)
+
     final_video = final_video.set_audio(final_audio)
     final_video.write_videofile(
         output_file,
