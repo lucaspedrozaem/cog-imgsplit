@@ -685,7 +685,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     extended_audio.write_audiofile(temp_filepath, fps=44100, nbytes=2, codec='pcm_s16le')
     
     # 6) Load that WAV with librosa for beat detection
-    y, sr = librosa.load(temp_filepath, sr=None)
+    y_full, sr_full = librosa.load(temp_filepath, sr=None)
     os.remove(temp_filepath)  # clean up
 
 
