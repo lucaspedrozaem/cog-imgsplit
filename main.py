@@ -750,7 +750,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
         target_duration = seg_end - seg_start
         local_path, caption = all_inputs[idx]
         print(f"Processing '{local_path}' for segment {idx+1} with target duration {target_duration:.2f}s")
-        if local_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+        if local_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tiff', '.tif', '.svg', '.heif', '.heic', '.ico', '.jfif', '.pjpeg', '.pjp', '.avif')):
             base_clip = mpe.ImageClip(local_path).set_duration(target_duration)
             clip = apply_ken_burns_effect(base_clip, target_duration, effect_hold, intensity_min, intensity_max)
         else:
