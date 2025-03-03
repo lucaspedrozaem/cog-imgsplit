@@ -139,6 +139,7 @@ def create_caption_clip(
             fill=bg_color,
             radius=border_radius
         )
+        
 
     # Compute offsets to center text
     offset_x = (img_width - text_width) / 2 - x0
@@ -291,7 +292,7 @@ def apply_ken_burns_effect(
         if random.choice([True, False]):
             offset = -offset
         #ss2 = [(1.0, 0.0), (Z, offset), (1.0, 0.0)]
-        
+
         ss2 = [(1.0, 0.0), (Z, offset)]
         short_sequences.append(ss1)
         short_sequences.append(ss2)
