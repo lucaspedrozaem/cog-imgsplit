@@ -622,7 +622,9 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
             fadein_duration   = 0.5
             hex_color         = "#000000"
            
-
+        if position == "random":
+            position = random.choice(POSSIBLE_POSITIONS)
+            
         try:
             local_path = download_file(url)
             downloaded_inputs.append((local_path, caption))
@@ -641,8 +643,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     trim = do_trim  # or False
 
 
-    if position == "random":
-        position = random.choice(POSSIBLE_POSITIONS)
+
 
     # --- A) Find the global peak in the entire audio.
     y_full, sr_full = librosa.load(song_file, sr=None)
