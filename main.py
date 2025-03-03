@@ -577,10 +577,16 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     # Example default font path if none is provided
     DEFAULT_FONT_PATH = "/fonts/Montserrat-VariableFont_wght.ttf"
 
-    if position == "random":
+    
+
+    first_video_position = video_info[0].get("position")
+
+    if first_video_position == "random":
 
         shuffle_pos = True
+
     else:
+        
         shuffle_pos = False
 
     for video in video_info:
