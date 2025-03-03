@@ -584,9 +584,10 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     if first_video_position == "random":
 
         shuffle_pos = True
+        print("random positioning")
 
     else:
-        
+
         shuffle_pos = False
 
     for video in video_info:
@@ -634,8 +635,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
             fadein_duration   = 0.5
             hex_color         = "#000000"
            
-        if shuffle_pos:
-            position = random.choice(POSSIBLE_POSITIONS)
+        
 
         try:
             local_path = download_file(url)
@@ -769,6 +769,10 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
 
             #pos = random.choice([ "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right", "middle" ])
             
+            if shuffle_pos:
+                position = random.choice(POSSIBLE_POSITIONS)
+
+
             caption_clip = create_caption_clip(
                 text=caption,
                 duration=target_duration,
