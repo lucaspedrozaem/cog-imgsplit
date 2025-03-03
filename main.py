@@ -282,7 +282,7 @@ def apply_ken_burns_effect(
     # 2) Pick a sequence of key states (zoom, offset)
     # ----------------------
     #if duration < 6:
-    if True
+    if True:
         # Sequences for short videos
         short_sequences = []
         # Two-phase sequences (3 key states, i.e. 2 transitions)
