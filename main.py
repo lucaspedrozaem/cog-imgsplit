@@ -577,6 +577,12 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     # Example default font path if none is provided
     DEFAULT_FONT_PATH = "/fonts/Montserrat-VariableFont_wght.ttf"
 
+    if position == "random":
+
+        shuffle_pos = True
+    else:
+        shuffle_pos = False
+
     for video in video_info:
         if isinstance(video, dict):
             url = video.get("url")
@@ -622,9 +628,9 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
             fadein_duration   = 0.5
             hex_color         = "#000000"
            
-        if position == "random":
+        if shuffle_pos:
             position = random.choice(POSSIBLE_POSITIONS)
-            
+
         try:
             local_path = download_file(url)
             downloaded_inputs.append((local_path, caption))
