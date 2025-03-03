@@ -640,6 +640,10 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     # 1) Optionally trim up to 10s before the global peak.
     trim = do_trim  # or False
 
+
+    if position == "random":
+        position = random.choice(POSSIBLE_POSITIONS)
+
     # --- A) Find the global peak in the entire audio.
     y_full, sr_full = librosa.load(song_file, sr=None)
     onset_env_full = librosa.onset.onset_strength(y=y_full, sr=sr_full)
