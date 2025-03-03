@@ -139,7 +139,7 @@ def create_caption_clip(
             fill=bg_color,
             radius=border_radius
         )
-        
+
 
     # Compute offsets to center text
     offset_x = (img_width - text_width) / 2 - x0
@@ -281,7 +281,8 @@ def apply_ken_burns_effect(
     # ----------------------
     # 2) Pick a sequence of key states (zoom, offset)
     # ----------------------
-    if duration < 6:
+    #if duration < 6:
+    if True
         # Sequences for short videos
         short_sequences = []
         # Two-phase sequences (3 key states, i.e. 2 transitions)
