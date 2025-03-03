@@ -284,11 +284,15 @@ def apply_ken_burns_effect(
         # Sequences for short videos
         short_sequences = []
         # Two-phase sequences (3 key states, i.e. 2 transitions)
-        ss1 = [(1.0, 0.0), (Z, 0.0), (1.0, 0.0)]
+        #ss1 = [(1.0, 0.0), (Z, 0.0), (1.0, 0.0)]
+        ss1 = [(1.0, 0.0), (Z, 0.0)]
+
         offset = random.uniform(slide_offset_min, slide_offset_max)
         if random.choice([True, False]):
             offset = -offset
-        ss2 = [(1.0, 0.0), (Z, offset), (1.0, 0.0)]
+        #ss2 = [(1.0, 0.0), (Z, offset), (1.0, 0.0)]
+        
+        ss2 = [(1.0, 0.0), (Z, offset)]
         short_sequences.append(ss1)
         short_sequences.append(ss2)
         # Single-phase sequence (2 key states, i.e. 1 transition)
