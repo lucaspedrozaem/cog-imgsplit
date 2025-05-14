@@ -508,6 +508,10 @@ def apply_ken_burns_effect(
         center_y = max(crop_h/2, min(center_y, h - crop_h/2))
 
         frame = get_frame(t)
+        
+        if frame.dtype != np.uint8:
+            frame = (frame * 255).clip(0, 255).astype(np.uint8)
+
         patch = cv2.getRectSubPix(
             frame,
             (int(round(crop_w)), int(round(crop_h))),
