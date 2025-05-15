@@ -107,6 +107,41 @@ def create_caption_clip(
     else:
         font = ImageFont.load_default()
 
+        # ----------------------------------------------------------
+    # 1⃣  Auto-wrap if the single line would be > 90 % of frame
+    # ----------------------------------------------------------
+    max_line_width = int(video_size[0] * 0.9) - 2 * padding          # 90 % minus padding
+    words = text.split()                                             # work word-by-word
+
+    def line_width(s: str) -> int:
+        "Helper: pixel width of a string using the current font."
+        return draw_dummy.textbbox((0, 0), s, font=font)[2]          # x1-x0
+
+    # Width of the whole sentence on one line
+    one_line_width = line_width(text)
+
+    if one_line_width > max_line_width and len(words) > 1:
+        # Try every possible break and keep the one that
+        #  - keeps both lines ≤ max_line_width  *and*
+        #  - minimises the difference in their widths (=> «even» lines)
+        best_split, best_score = None, None
+        for i in range(1, len(words)):                               # break *after* word i-1
+            left  = " ".join(words[:i])
+            right = " ".join(words[i:])
+            w_left, w_right = line_width(left), line_width(right)
+            if max(w_left, w_right) <= max_line_width:
+                score = abs(w_left - w_right)                        # how balanced the two halves are
+                if best_score is None or score < best_score:
+                    best_split, best_score = i, score
+
+        # Fallback: if **no** legal split keeps both lines ≤ 90 %, take the middle
+        if best_split is None:
+            best_split = len(words) // 2
+
+        text = " ".join(words[:best_split]) + "\n" + " ".join(words[best_split:])
+    # ----------------------------------------------------------
+
+
     # Measure the text's bounding box relative to (0,0)
     dummy_img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
     draw_dummy = ImageDraw.Draw(dummy_img)
@@ -508,7 +543,7 @@ def apply_ken_burns_effect(
         center_y = max(crop_h/2, min(center_y, h - crop_h/2))
 
         frame = get_frame(t)
-        
+
         if frame.dtype != np.uint8:
             frame = (frame * 255).clip(0, 255).astype(np.uint8)
 
