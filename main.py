@@ -107,6 +107,10 @@ def create_caption_clip(
     else:
         font = ImageFont.load_default()
 
+    # Measure the text's bounding box relative to (0,0)
+    dummy_img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+    draw_dummy = ImageDraw.Draw(dummy_img)
+
         # ----------------------------------------------------------
     # 1⃣  Auto-wrap if the single line would be > 90 % of frame
     # ----------------------------------------------------------
@@ -142,9 +146,7 @@ def create_caption_clip(
     # ----------------------------------------------------------
 
 
-    # Measure the text's bounding box relative to (0,0)
-    dummy_img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
-    draw_dummy = ImageDraw.Draw(dummy_img)
+    
     x0, y0, x1, y1 = draw_dummy.textbbox((0, 0), text, font=font)
 
     text_width = x1 - x0
