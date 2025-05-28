@@ -565,7 +565,7 @@ def apply_ken_burns_effect(
 
 
 
-def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_hold: float, intensity_min: float, intensity_max: float, output_file: str,
+def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_hold: float, intensity_min: float, intensity_max: float, add_sub: bool, add_audio: bool, output_file: str,
                         loop_count: int = 1, aspect_ratio: str = "16:9",
                         target_resolution: tuple = None):
     """
@@ -806,7 +806,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
         clip = clip.fx(vfx.speedx, speed_factor)
         clip = clip.set_duration(target_duration)
 
-        if caption:
+        if caption and add_sub:
 
             #pos = random.choice([ "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right", "middle" ])
             
@@ -854,7 +854,10 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
         looped_audio = audio_loop(song_audio, duration=final_duration)
         final_audio = looped_audio.subclip(0, final_duration)
 
-    final_video = final_video.set_audio(final_audio)
+    if add_audio:
+        
+        final_video = final_video.set_audio(final_audio)
+
     final_video.write_videofile(
         output_file,
         codec="libx264",

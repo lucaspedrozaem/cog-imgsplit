@@ -30,6 +30,14 @@ class Predictor(BasePredictor):
         do_trim: bool = Input(
             description="Trim long song", default=False
         ),
+        add_sub: bool = Input(
+            description="Add sub",
+            default=True,
+        ),
+        add_audio: bool = Input(
+            description="Add audio",
+            default=True,
+        ),
         effect_hold: float = Input(
             description="Hold effect",
             default=0.5,
@@ -80,6 +88,8 @@ class Predictor(BasePredictor):
             effect_hold,
             intensity_min,
             intensity_max,
+            add_sub,
+            add_audio,
             output_file,
             loop_count=loop_count,
             aspect_ratio=aspect_ratio,
