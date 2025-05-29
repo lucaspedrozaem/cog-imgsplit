@@ -111,40 +111,47 @@ def create_caption_clip(
     dummy_img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
     draw_dummy = ImageDraw.Draw(dummy_img)
 
-        # ----------------------------------------------------------
-    # 1⃣  Auto-wrap if the single line would be > 90 % of frame
     # ----------------------------------------------------------
-    max_line_width = int(video_size[0] * 0.9) - 2 * padding          # 90 % minus padding
-    words = text.split()                                             # work word-by-word
+    # 1⃣  Auto-wrap: first try 2 lines, then (optionally) 3 lines
+    # ----------------------------------------------------------
+    max_line_width = int(video_size[0] * 0.9) - 2 * padding
+    words = text.split()
 
     def line_width(s: str) -> int:
-        "Helper: pixel width of a string using the current font."
-        return draw_dummy.textbbox((0, 0), s, font=font)[2]          # x1-x0
+        return draw_dummy.textbbox((0, 0), s, font=font)[2]
 
-    # Width of the whole sentence on one line
-    one_line_width = line_width(text)
-
-    if one_line_width > max_line_width and len(words) > 1:
-        # Try every possible break and keep the one that
-        #  - keeps both lines ≤ max_line_width  *and*
-        #  - minimises the difference in their widths (=> «even» lines)
+    def split_evenly(ws: list[str]) -> tuple[str, str]:
+        """Return the 'best' two-line split of the words list."""
         best_split, best_score = None, None
-        for i in range(1, len(words)):                               # break *after* word i-1
-            left  = " ".join(words[:i])
-            right = " ".join(words[i:])
-            w_left, w_right = line_width(left), line_width(right)
-            if max(w_left, w_right) <= max_line_width:
-                score = abs(w_left - w_right)                        # how balanced the two halves are
+        for i in range(1, len(ws)):
+            left, right = " ".join(ws[:i]), " ".join(ws[i:])
+            wl, wr = line_width(left), line_width(right)
+            if max(wl, wr) <= max_line_width:                  # legal split
+                score = abs(wl - wr)                           # balance metric
                 if best_score is None or score < best_score:
                     best_split, best_score = i, score
+        if best_split is None:                                 # fallback = middle
+            best_split = len(ws) // 2
+        return " ".join(ws[:best_split]), " ".join(ws[best_split:])
 
-        # Fallback: if **no** legal split keeps both lines ≤ 90 %, take the middle
-        if best_split is None:
-            best_split = len(words) // 2
+    # ---- first, try to reduce to ≤2 lines
+    one_line_width = line_width(text)
+    if one_line_width > max_line_width and len(words) > 1:
+        line_a, line_b = split_evenly(words)
+        text = f"{line_a}\n{line_b}"
 
-        text = " ".join(words[:best_split]) + "\n" + " ".join(words[best_split:])
+        # ---- now, if either line is STILL too wide, try a third line
+        # (we only split the widest of the two lines).
+        lines = text.split("\n")
+        widest_idx = max(range(len(lines)), key=lambda i: line_width(lines[i]))
+        if (line_width(lines[widest_idx]) > max_line_width          # still too wide
+                and len(lines) < 3                                  # keep max=3
+                and len(lines[widest_idx].split()) > 1):            # >1 word
+            sub_a, sub_b = split_evenly(lines[widest_idx].split())
+            # insert the two new lines in place of the oversize one
+            lines = lines[:widest_idx] + [sub_a, sub_b] + lines[widest_idx+1:]
+            text = "\n".join(lines)
     # ----------------------------------------------------------
-
 
     
     x0, y0, x1, y1 = draw_dummy.textbbox((0, 0), text, font=font)
