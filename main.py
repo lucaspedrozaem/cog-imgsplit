@@ -792,6 +792,9 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
 
     
     video_clips = []
+
+    previous_caption = None          # remember last one
+
     for idx, (seg_start, seg_end) in enumerate(segments):
         if idx >= allowed_segments:
             break
@@ -817,6 +820,8 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
 
             #pos = random.choice([ "top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right", "middle" ])
             
+            this_fadein = 0 if caption == previous_caption else fadein_duration
+
             if shuffle_pos:
                 position = random.choice(POSSIBLE_POSITIONS)
 
@@ -837,12 +842,13 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
                 border_radius=border_radius,
                 padding=10,
                 hex_color=hex_color,
-                fadein_duration=fadein_duration
+                fadein_duration=this_fadein
             )
 
             clip = mpe.CompositeVideoClip([clip, caption_clip])
 
         video_clips.append(clip)
+        previous_caption = caption
     
     final_video = mpe.concatenate_videoclips(video_clips, method="compose")
     final_duration = final_video.duration
