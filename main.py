@@ -250,10 +250,10 @@ def create_caption_clip(
             return (W - clip_w - margin, margin)
         elif pos == "bottom-left":
             return (margin, H - clip_h - margin)
-            
+
         elif pos == "bottom-center":
 
-            lift = int(0.25 * H)                      # 25 % of full height
+            lift = int(0.20 * H)                      # 25 % of full height
             y = max(margin, H - clip_h - lift)        # never go above the top margin
             return ((W - clip_w) // 2, y)
             
