@@ -17,7 +17,7 @@ import requests
 def download_file(url: str) -> str:
     """Download a file (video or image) from a URL into a temporary file."""
     parsed_url = urlparse(url)
-    suffix = os.path.splitext(parsed_url.path)[1]
+    suffix = os.path.splitext(parsed_url.path)[1].lower()
     if not suffix:
         suffix = ".jpg"
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -27,6 +27,24 @@ def download_file(url: str) -> str:
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
                 f.write(chunk)
+
+    # # ---- 3) AVIF → PNG ------------------------------------------------------
+    # if suffix == ".avif":
+    #     png_path = tmp_path[:-5] + ".png"          # same name, new ext
+    #     try:
+    #         subprocess.run(
+    #             ["ffmpeg", "-y", "-i", tmp_path, png_path],
+    #             stdout=subprocess.DEVNULL,
+    #             stderr=subprocess.DEVNULL,
+    #             check=True,
+    #         )
+    #     except FileNotFoundError:  # ffmpeg not on PATH
+    #         raise RuntimeError(
+    #             "ffmpeg is required to convert AVIF images but was not found."
+    #         ) from None
+    #     os.remove(tmp_path)        # cleanup the original .avif
+    #     tmp_path = png_path        # point to the converted file
+
     return temp_file.name
 
 def crop_to_aspect(clip: mpe.VideoClip, desired_aspect_ratio: float) -> mpe.VideoClip:
@@ -232,8 +250,14 @@ def create_caption_clip(
             return (W - clip_w - margin, margin)
         elif pos == "bottom-left":
             return (margin, H - clip_h - margin)
+            
         elif pos == "bottom-center":
-            return ((W - clip_w) // 2, H - clip_h - margin)
+
+            lift = int(0.25 * H)                      # 25 % of full height
+            y = max(margin, H - clip_h - lift)        # never go above the top margin
+            return ((W - clip_w) // 2, y)
+            
+
         elif pos == "bottom-right":
             return (W - clip_w - margin, H - clip_h - margin)
         elif pos == "middle":
