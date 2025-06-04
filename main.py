@@ -8,11 +8,34 @@ from urllib.parse import urlparse
 import cv2
 import numpy as np
 import librosa
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 import moviepy.editor as mpe
 import moviepy.video.fx.all as vfx
 from moviepy.audio.fx.all import audio_loop
 import requests
+
+IMAGE_EXTS = (
+    '.jpg', '.jpeg', '.png', '.webp', '.bmp',
+    '.tif', '.tiff', '.heic', '.heif', '.avif', '.gif'
+)
+
+def normalise_exif_orientation(path: str) -> str:
+    """
+    Return a path to an image whose pixel matrix has already been
+    rotated to match any EXIF Orientation tag.  
+    If the file is not a supported image, the original path is returned.
+    """
+    if not os.path.splitext(path.lower())[1] in IMAGE_EXTS:
+        return path                      # probably a video – leave untouched
+
+    img = Image.open(path)
+    img = ImageOps.exif_transpose(img)   # 🪄 auto-rotate & strip orientation tag
+
+    tmp = tempfile.NamedTemporaryFile(delete=False,
+                                      suffix=os.path.splitext(path)[1]).name
+    img.save(tmp, format=img.format)
+    
+    return tmp
 
 def download_file(url: str) -> str:
     """Download a file (video or image) from a URL into a temporary file."""
@@ -710,8 +733,13 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
         
 
         try:
+
             local_path = download_file(url)
+
+            local_path = normalise_exif_orientation(local_path)
+
             downloaded_inputs.append((local_path, caption))
+
             print(f"Downloaded {url} -> {local_path}")
         except Exception as e:
             print(f"Failed to download {url}: {e}")
