@@ -4,7 +4,7 @@ import os
 import random
 import tempfile
 from urllib.parse import urlparse
-
+import io
 import cv2
 import numpy as np
 import librosa
