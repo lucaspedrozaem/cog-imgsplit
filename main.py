@@ -37,38 +37,70 @@ def normalise_exif_orientation(path: str) -> str:
     
     return tmp
 
+
 def download_file(url: str) -> str:
     """Download a file (video or image) from a URL into a temporary file."""
     parsed_url = urlparse(url)
     suffix = os.path.splitext(parsed_url.path)[1].lower()
     if not suffix:
-        suffix = ".jpg"
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        suffix = ".png"
+
     response = requests.get(url, stream=True)
     response.raise_for_status()
-    with open(temp_file.name, "wb") as f:
+
+    if suffix in IMAGE_EXTS:
+        # Convert image stream to RGBA and save as PNG
+        image_data = io.BytesIO(response.content)
+        img = Image.open(image_data).convert("RGBA")
+        tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+        img.save(tmp_path, format="PNG")
+        return tmp_path
+
+    # Non-image files
+    tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix=suffix).name
+    with open(tmp_path, "wb") as f:
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
                 f.write(chunk)
 
-    # # ---- 3) AVIF → PNG ------------------------------------------------------
-    # if suffix == ".avif":
-    #     png_path = tmp_path[:-5] + ".png"          # same name, new ext
-    #     try:
-    #         subprocess.run(
-    #             ["ffmpeg", "-y", "-i", tmp_path, png_path],
-    #             stdout=subprocess.DEVNULL,
-    #             stderr=subprocess.DEVNULL,
-    #             check=True,
-    #         )
-    #     except FileNotFoundError:  # ffmpeg not on PATH
-    #         raise RuntimeError(
-    #             "ffmpeg is required to convert AVIF images but was not found."
-    #         ) from None
-    #     os.remove(tmp_path)        # cleanup the original .avif
-    #     tmp_path = png_path        # point to the converted file
+    return tmp_path
 
-    return temp_file.name
+# def download_file(url: str) -> str:
+#     """Download a file (video or image) from a URL into a temporary file."""
+#     parsed_url = urlparse(url)
+#     suffix = os.path.splitext(parsed_url.path)[1].lower()
+
+#     if not suffix:
+#         suffix = ".jpg"
+
+
+#     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+#     response = requests.get(url, stream=True)
+#     response.raise_for_status()
+#     with open(temp_file.name, "wb") as f:
+#         for chunk in response.iter_content(chunk_size=8192):
+#             if chunk:
+#                 f.write(chunk)
+
+
+#     # # ---- 3) AVIF → PNG ------------------------------------------------------
+#     # if suffix == ".avif":
+#     #     png_path = tmp_path[:-5] + ".png"          # same name, new ext
+#     #     try:
+#     #         subprocess.run(
+#     #             ["ffmpeg", "-y", "-i", tmp_path, png_path],
+#     #             stdout=subprocess.DEVNULL,
+#     #             stderr=subprocess.DEVNULL,
+#     #             check=True,
+#     #         )
+#     #     except FileNotFoundError:  # ffmpeg not on PATH
+#     #         raise RuntimeError(
+#     #             "ffmpeg is required to convert AVIF images but was not found."
+#     #         ) from None
+#     #     os.remove(tmp_path)        # cleanup the original .avif
+#     #     tmp_path = png_path        # point to the converted file
+
+#     return temp_file.name
 
 def crop_to_aspect(clip: mpe.VideoClip, desired_aspect_ratio: float) -> mpe.VideoClip:
     """Center-crop the clip using a cover strategy so that its aspect ratio matches the desired value."""
