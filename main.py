@@ -734,7 +734,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
             padding           = 10
             slowdown = 1.0
             fadein_duration   = 0.5
-            ken_burns         = video.get("ken_burns", True)
+            ken_burns         = True
             hex_color         = "#000000"
            
         
