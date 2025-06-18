@@ -56,6 +56,12 @@ class Predictor(BasePredictor):
             ge=0,
             le=2,
         ),
+        ideal_dur: float = Input(
+            description="Duration",
+            default=0.0,
+            ge=0,
+            le=10,
+        ),
         target_resolution: str = Input(
             description="Output resolution in WIDTHxHEIGHT format (e.g. '1920x1080').",
             default="1920x1080"
@@ -93,7 +99,8 @@ class Predictor(BasePredictor):
             output_file,
             loop_count=loop_count,
             aspect_ratio=aspect_ratio,
-            target_resolution=target_resolution_tuple
+            target_resolution=target_resolution_tuple,
+            ideal_dur=ideal_dur
         )
         
         # Clean up the downloaded song file.

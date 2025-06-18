@@ -626,7 +626,7 @@ def apply_ken_burns_effect(
 
 def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_hold: float, intensity_min: float, intensity_max: float, add_sub: bool, add_audio: bool, output_file: str,
                         loop_count: int = 1, aspect_ratio: str = "16:9",
-                        target_resolution: tuple = None):
+                        target_resolution: tuple = None, ideal_dur: float = 0.0):
     """
     Processes inputs (videos and images) and synchronizes them to the beat of the song.
     
@@ -712,6 +712,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
             padding           = video.get("padding", 10)
             bg_color          = video.get("bg_color", 10)
             hex_color         = video.get("hex_color", "#000000")
+            ken_burns         = video.get("ken_burns", True)
             fadein_duration   = video.get("fadein_duration", 0.5)
 
         else:
@@ -733,6 +734,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
             padding           = 10
             slowdown = 1.0
             fadein_duration   = 0.5
+            ken_burns         = video.get("ken_burns", True)
             hex_color         = "#000000"
            
         
@@ -814,9 +816,12 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
     print(f"Detected tempo: {float(tempo):.2f} BPM")
     print("Good beat times (in subclip timeline):", good_beats)
 
-    # 4) Decide an 'ideal_dur' for uniform segments in [3..5].
-    ideal_dur = random.uniform(3, 5)
+   
+    if ideal_dur == 0:                       # no user preference → use default window
+        ideal_dur = random.uniform(3, 5)
+    
     print(f"Ideal segment duration: {ideal_dur:.2f}s")
+
 
     # 5) Create segments so each segment is ~ideal_dur, 
     #    using good beats for boundaries. We stop if we reach allowed_segments.
@@ -860,7 +865,11 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
         print(f"Processing '{local_path}' for segment {idx+1} with target duration {target_duration:.2f}s")
         if local_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tiff', '.tif', '.svg', '.heif', '.heic', '.ico', '.jfif', '.pjpeg', '.pjp', '.avif')):
             base_clip = mpe.ImageClip(local_path).set_duration(target_duration)
-            clip = apply_ken_burns_effect(base_clip, target_duration, effect_hold, intensity_min, intensity_max)
+
+            if ken_burns:
+                clip = apply_ken_burns_effect(base_clip, target_duration, effect_hold, intensity_min, intensity_max)
+            else:
+                clip = base_clip
         else:
             clip = mpe.VideoFileClip(local_path).without_audio()
         clip = crop_to_aspect(clip, desired_ratio)
