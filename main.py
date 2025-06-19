@@ -458,95 +458,95 @@ def apply_ken_burns_effect(
             long_sequences.append(seqE)
             key_states = random.choice(long_sequences)
 
-    # ----------------------
-    # 3) Safe transitions
-    #    (3.1) Avoid zoom-out from full view
-    # ----------------------
-    for i in range(1, len(key_states)):
-        nz, noff = key_states[i]
-        if nz == 1.0 or noff != 0:
-            pz, poff = key_states[i-1]
-            if pz == 1.0:
-                key_states[i-1] = (Z, poff)
+        # ----------------------
+        # 3) Safe transitions
+        #    (3.1) Avoid zoom-out from full view
+        # ----------------------
+        for i in range(1, len(key_states)):
+            nz, noff = key_states[i]
+            if nz == 1.0 or noff != 0:
+                pz, poff = key_states[i-1]
+                if pz == 1.0:
+                    key_states[i-1] = (Z, poff)
 
-    # ----------------------
-    # 3.2) Avoid immediate pan direction reversal (R->L or L->R)
-    # Instead of zeroing the second offset, reduce it.
-    # ----------------------
-    for i in range(1, len(key_states)):
-        prev_offset = key_states[i-1][1]
-        cur_offset  = key_states[i][1]
-        if prev_offset != 0 and cur_offset != 0:
-            if (prev_offset * cur_offset) < 0:
-                key_states[i] = (key_states[i][0], cur_offset * 0.5)
+        # ----------------------
+        # 3.2) Avoid immediate pan direction reversal (R->L or L->R)
+        # Instead of zeroing the second offset, reduce it.
+        # ----------------------
+        for i in range(1, len(key_states)):
+            prev_offset = key_states[i-1][1]
+            cur_offset  = key_states[i][1]
+            if prev_offset != 0 and cur_offset != 0:
+                if (prev_offset * cur_offset) < 0:
+                    key_states[i] = (key_states[i][0], cur_offset * 0.5)
 
-    # ----------------------
-    # 4) Avoid immediate zoom in->out or out->in by removing the middle state.
-    # ----------------------
-    def zoom_direction(z1, z2):
-        if z2 > z1:
-            return "IN"
-        elif z2 < z1:
-            return "OUT"
-        else:
-            return "NONE"
+        # ----------------------
+        # 4) Avoid immediate zoom in->out or out->in by removing the middle state.
+        # ----------------------
+        def zoom_direction(z1, z2):
+            if z2 > z1:
+                return "IN"
+            elif z2 < z1:
+                return "OUT"
+            else:
+                return "NONE"
 
-    i = 0
-    while i < len(key_states) - 2:
-        z1, _ = key_states[i]
-        z2, _ = key_states[i+1]
-        z3, _ = key_states[i+2]
-        d1 = zoom_direction(z1, z2)
-        d2 = zoom_direction(z2, z3)
-        if (d1 == "IN" and d2 == "OUT") or (d1 == "OUT" and d2 == "IN"):
-            key_states.pop(i+1)  # remove the middle state
-            if i > 0:
-                i -= 1
-        else:
-            i += 1
+        i = 0
+        while i < len(key_states) - 2:
+            z1, _ = key_states[i]
+            z2, _ = key_states[i+1]
+            z3, _ = key_states[i+2]
+            d1 = zoom_direction(z1, z2)
+            d2 = zoom_direction(z2, z3)
+            if (d1 == "IN" and d2 == "OUT") or (d1 == "OUT" and d2 == "IN"):
+                key_states.pop(i+1)  # remove the middle state
+                if i > 0:
+                    i -= 1
+            else:
+                i += 1
 
-    # ----------------------
-    # 5) Ensure there's at least some difference in states
-    #    (avoid the scenario of two consecutive states being identical)
-    # ----------------------
-    def states_have_movement(kstates):
-        """Check if there's any difference in zoom or offset across these states."""
-        for idx in range(len(kstates) - 1):
-            z1, off1 = kstates[idx]
-            z2, off2 = kstates[idx+1]
-            if abs(z1 - z2) > 1e-3 or abs(off1 - off2) > 1e-2:
-                return True
-        return False
+        # ----------------------
+        # 5) Ensure there's at least some difference in states
+        #    (avoid the scenario of two consecutive states being identical)
+        # ----------------------
+        def states_have_movement(kstates):
+            """Check if there's any difference in zoom or offset across these states."""
+            for idx in range(len(kstates) - 1):
+                z1, off1 = kstates[idx]
+                z2, off2 = kstates[idx+1]
+                if abs(z1 - z2) > 1e-3 or abs(off1 - off2) > 1e-2:
+                    return True
+            return False
 
-    if len(key_states) == 1:
-        z, off = key_states[0]
-        new_z = z + 0.05 if z == 1.0 else z + 0.02
-        key_states = [key_states[0], (new_z, off)]
-    elif not states_have_movement(key_states):
-        z_last, off_last = key_states[-1]
-        small_zoom = z_last + 0.05 if abs(z_last - 1.0) < 0.01 else z_last + 0.02
-        key_states[-1] = (small_zoom, off_last)
+        if len(key_states) == 1:
+            z, off = key_states[0]
+            new_z = z + 0.05 if z == 1.0 else z + 0.02
+            key_states = [key_states[0], (new_z, off)]
+        elif not states_have_movement(key_states):
+            z_last, off_last = key_states[-1]
+            small_zoom = z_last + 0.05 if abs(z_last - 1.0) < 0.01 else z_last + 0.02
+            key_states[-1] = (small_zoom, off_last)
 
-    # --- NEW STEP: Remove duplicate consecutive states ---
-    filtered_key_states = [key_states[0]]
-    for state in key_states[1:]:
-        prev = filtered_key_states[-1]
-        # If both zoom and offset are nearly identical, skip adding this duplicate state.
-        if abs(state[0] - prev[0]) < 1e-3 and abs(state[1] - prev[1]) < 1e-2:
-            continue
-        filtered_key_states.append(state)
-    key_states = filtered_key_states
+        # --- NEW STEP: Remove duplicate consecutive states ---
+        filtered_key_states = [key_states[0]]
+        for state in key_states[1:]:
+            prev = filtered_key_states[-1]
+            # If both zoom and offset are nearly identical, skip adding this duplicate state.
+            if abs(state[0] - prev[0]) < 1e-3 and abs(state[1] - prev[1]) < 1e-2:
+                continue
+            filtered_key_states.append(state)
+        key_states = filtered_key_states
 
-    # --- NEW STEP: Ensure minimum zoom difference when offsets are zero ---
-    # If both consecutive states have zero offset and the zoom difference is less than 0.2,
-    # force the difference to be exactly 0.2.
-    for i in range(1, len(key_states)):
-        prev_zoom, prev_off = key_states[i-1]
-        curr_zoom, curr_off = key_states[i]
-        if abs(prev_off) < 1e-2 and abs(curr_off) < 1e-2:  # both offsets zero
-            if curr_zoom - prev_zoom < 0.2:
-                key_states[i] = (prev_zoom + 0.2, curr_off)
-
+        # --- NEW STEP: Ensure minimum zoom difference when offsets are zero ---
+        # If both consecutive states have zero offset and the zoom difference is less than 0.2,
+        # force the difference to be exactly 0.2.
+        for i in range(1, len(key_states)):
+            prev_zoom, prev_off = key_states[i-1]
+            curr_zoom, curr_off = key_states[i]
+            if abs(prev_off) < 1e-2 and abs(curr_off) < 1e-2:  # both offsets zero
+                if curr_zoom - prev_zoom < 0.2:
+                    key_states[i] = (prev_zoom + 0.2, curr_off)
+                    
     print("Debug: Final key states after duplicate removal and zoom adjustment:")
     for idx, state in enumerate(key_states):
         print(f"  State {idx}: Zoom = {state[0]:.3f}, Offset = {state[1]:.3f}")
