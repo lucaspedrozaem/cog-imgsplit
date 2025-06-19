@@ -973,9 +973,13 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
         temp_audiofile="temp-audio.m4a",
         remove_temp=True,
     )
-    for temp_file, _ in downloaded_inputs:
+    
+
+    for entry in downloaded_inputs:          # entry is the 4-tuple
+        temp_file = entry[0]                 # local_path
         try:
             os.remove(temp_file)
             print(f"Removed temporary file: {temp_file}")
         except Exception as e:
             print(f"Error removing temporary file {temp_file}: {e}")
+
