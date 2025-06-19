@@ -322,7 +322,21 @@ def create_caption_clip(
 #     return image_clip.fl(ken_burns, apply_to=['mask', 'video'])
 
 
+def build_kb_preset(preset_id: int, w: int, Z: float) -> list[tuple[float, float]]:
+    max_off = (w / Z - w) / -2.0      # pan as far as the edge of the zoomed view
+    half    = 0.5 * max_off           # a bit gentler
 
+    presets = {
+        1: [(1.0, 0.0), (Z,   0.0)],                  # centre zoom-in
+        2: [(Z,   0.0), (1.0, 0.0)],                  # centre zoom-out
+        3: [(1.0, -half), (1.0, half)],               # pan left → right
+        4: [(1.0,  half), (1.0,-half)],               # pan right → left
+        5: [(1.0, -half), (Z,   -half)],              # zoom-in on left side
+        6: [(1.0,  half), (Z,    half)],              # zoom-in on right side
+    }
+    if preset_id not in presets:
+        raise ValueError("Ken Burns preset must be 0 or 1–6.")
+    return presets[preset_id]
 
 def smoothstep(u: float) -> float:
     """Smoothstep easing function for u in [0,1]."""
@@ -334,6 +348,7 @@ def apply_ken_burns_effect(
     start_hold: float = 0.5,
     intensity_min: float = 1.2,
     intensity_max: float = 1.4,
+    preset: int = 0
 ) -> mpe.VideoClip:
     """
     A Ken Burns-style effect that chooses a sequence of zoom/pan states
@@ -374,67 +389,74 @@ def apply_ken_burns_effect(
     # Smaller offset for pre-slide at full view
     pre_max = max(5, 0.05 * w)
 
-    # ----------------------
-    # 2) Pick a sequence of key states (zoom, offset)
-    # ----------------------
-    #if duration < 6:
-    if True:
-        # Sequences for short videos
-        short_sequences = []
-        # Two-phase sequences (3 key states, i.e. 2 transitions)
-        #ss1 = [(1.0, 0.0), (Z, 0.0), (1.0, 0.0)]
-        ss1 = [(1.0, 0.0), (Z, 0.0)]
 
-        offset = random.uniform(slide_offset_min, slide_offset_max)
-        if random.choice([True, False]):
-            offset = -offset
-        #ss2 = [(1.0, 0.0), (Z, offset), (1.0, 0.0)]
+    if preset != 0:                                    # 1–6
+        
+        key_states = build_kb_preset(preset, w, Z)
 
-        ss2 = [(1.0, 0.0), (Z, offset)]
-        short_sequences.append(ss1)
-        short_sequences.append(ss2)
-        # Single-phase sequence (2 key states, i.e. 1 transition)
-        offset = random.uniform(slide_offset_min, slide_offset_max)
-        if random.choice([True, False]):
-            offset = -offset
-        ss_single = [(1.0, 0.0), (Z, offset)]
-        short_sequences.append(ss_single)
-        key_states = random.choice(short_sequences)
     else:
-        # Sequences for longer videos
-        long_sequences = []
-        # Example A
-        offset = random.uniform(slide_offset_min, slide_offset_max)
-        if random.choice([True, False]):
-            offset = -offset
-        seqA = [(1.0, 0.0), (Z, 0.0), (Z, offset), (1.0, 0.0)]
-        long_sequences.append(seqA)
-        # Example B
-        pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
-        seqB = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset), (1.0, 0.0)]
-        long_sequences.append(seqB)
-        # Example C
-        pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
-        offset = random.uniform(slide_offset_min, slide_offset_max)
-        if random.choice([True, False]):
-            offset = -offset
-        seqC = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset),
-                (Z, offset), (1.0, 0.0)]
-        long_sequences.append(seqC)
-        # Example D
-        offset1 = random.uniform(slide_offset_min, slide_offset_max) * random.choice([-1, 1])
-        offset2 = random.uniform(slide_offset_min, slide_offset_max) * random.choice([-1, 1])
-        seqD = [(1.0, 0.0), (Z, 0.0), (Z, offset1), (Z, offset2), (1.0, 0.0)]
-        long_sequences.append(seqD)
-        # Example E
-        pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
-        offset = random.uniform(slide_offset_min, slide_offset_max)
-        if random.choice([True, False]):
-            offset = -offset
-        seqE = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset),
-                (Z, offset), (Z, pre_offset), (1.0, 0.0)]
-        long_sequences.append(seqE)
-        key_states = random.choice(long_sequences)
+
+        # ----------------------
+        # 2) Pick a sequence of key states (zoom, offset)
+        # ----------------------
+        #if duration < 6:
+        if True:
+            # Sequences for short videos
+            short_sequences = []
+            # Two-phase sequences (3 key states, i.e. 2 transitions)
+            #ss1 = [(1.0, 0.0), (Z, 0.0), (1.0, 0.0)]
+            ss1 = [(1.0, 0.0), (Z, 0.0)]
+
+            offset = random.uniform(slide_offset_min, slide_offset_max)
+            if random.choice([True, False]):
+                offset = -offset
+            #ss2 = [(1.0, 0.0), (Z, offset), (1.0, 0.0)]
+
+            ss2 = [(1.0, 0.0), (Z, offset)]
+            short_sequences.append(ss1)
+            short_sequences.append(ss2)
+            # Single-phase sequence (2 key states, i.e. 1 transition)
+            offset = random.uniform(slide_offset_min, slide_offset_max)
+            if random.choice([True, False]):
+                offset = -offset
+            ss_single = [(1.0, 0.0), (Z, offset)]
+            short_sequences.append(ss_single)
+            key_states = random.choice(short_sequences)
+        else:
+            # Sequences for longer videos
+            long_sequences = []
+            # Example A
+            offset = random.uniform(slide_offset_min, slide_offset_max)
+            if random.choice([True, False]):
+                offset = -offset
+            seqA = [(1.0, 0.0), (Z, 0.0), (Z, offset), (1.0, 0.0)]
+            long_sequences.append(seqA)
+            # Example B
+            pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
+            seqB = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset), (1.0, 0.0)]
+            long_sequences.append(seqB)
+            # Example C
+            pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
+            offset = random.uniform(slide_offset_min, slide_offset_max)
+            if random.choice([True, False]):
+                offset = -offset
+            seqC = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset),
+                    (Z, offset), (1.0, 0.0)]
+            long_sequences.append(seqC)
+            # Example D
+            offset1 = random.uniform(slide_offset_min, slide_offset_max) * random.choice([-1, 1])
+            offset2 = random.uniform(slide_offset_min, slide_offset_max) * random.choice([-1, 1])
+            seqD = [(1.0, 0.0), (Z, 0.0), (Z, offset1), (Z, offset2), (1.0, 0.0)]
+            long_sequences.append(seqD)
+            # Example E
+            pre_offset = random.uniform(0, pre_max) * random.choice([-1, 1])
+            offset = random.uniform(slide_offset_min, slide_offset_max)
+            if random.choice([True, False]):
+                offset = -offset
+            seqE = [(1.0, 0.0), (1.0, pre_offset), (Z, pre_offset),
+                    (Z, offset), (Z, pre_offset), (1.0, 0.0)]
+            long_sequences.append(seqE)
+            key_states = random.choice(long_sequences)
 
     # ----------------------
     # 3) Safe transitions
@@ -714,6 +736,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
             hex_color         = video.get("hex_color", "#000000")
             ken_burns         = video.get("ken_burns", True)
             fadein_duration   = video.get("fadein_duration", 0.5)
+            kb_preset         = video.get("ken_burns_preset", 0)
 
         else:
             # If 'video' is just a string, assume it's the URL.
@@ -736,6 +759,7 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
             fadein_duration   = 0.5
             ken_burns         = True
             hex_color         = "#000000"
+            kb_preset         = 0
            
         
 
@@ -745,7 +769,9 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
 
             local_path = normalise_exif_orientation(local_path)
 
-            downloaded_inputs.append((local_path, caption))
+            downloaded_inputs.append((local_path, caption, ken_burns, kb_preset))
+
+
 
             print(f"Downloaded {url} -> {local_path}")
         except Exception as e:
@@ -861,13 +887,15 @@ def sync_videos_to_song(video_info: list, song_file: str, do_trim: bool, effect_
         if idx >= allowed_segments:
             break
         target_duration = seg_end - seg_start
-        local_path, caption = all_inputs[idx]
+        
+        local_path, caption, ken_burns, kb_preset = all_inputs[idx]
+
         print(f"Processing '{local_path}' for segment {idx+1} with target duration {target_duration:.2f}s")
         if local_path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tiff', '.tif', '.svg', '.heif', '.heic', '.ico', '.jfif', '.pjpeg', '.pjp', '.avif')):
             base_clip = mpe.ImageClip(local_path).set_duration(target_duration)
 
             if ken_burns:
-                clip = apply_ken_burns_effect(base_clip, target_duration, effect_hold, intensity_min, intensity_max)
+                clip = apply_ken_burns_effect(base_clip, target_duration, effect_hold, intensity_min, intensity_max, kb_preset)
             else:
                 clip = base_clip
         else:
