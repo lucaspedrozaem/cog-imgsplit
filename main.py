@@ -302,45 +302,64 @@ def create_caption_clip(
     return caption_clip
 
 
-# def apply_ken_burns_effect(image_clip: mpe.ImageClip, duration: float) -> mpe.VideoClip:
-#     """Apply a Ken Burns effect (slow zoom and horizontal pan) to an ImageClip."""
-#     w, h = image_clip.size
-#     def ken_burns(get_frame, t):
-#         zoom = 1 + 0.2 * (t / duration)
-#         new_w, new_h = int(w / zoom), int(h / zoom)
-#         max_offset = (w - new_w) // 2
-#         offset_x = int(max_offset * (2 * t / duration - 1))
-#         offset_y = 0
-#         x1 = max(0, (w - new_w) // 2 + offset_x)
-#         y1 = max(0, (h - new_h) // 2 + offset_y)
-#         x2 = x1 + new_w
-#         y2 = y1 + new_h
-#         frame = get_frame(t)
-#         cropped = frame[y1:y2, x1:x2]
-#         resized = cv2.resize(cropped, (w, h))
-#         return resized
-#     return image_clip.fl(ken_burns, apply_to=['mask', 'video'])
+
+
+
+# def build_kb_preset(preset_id: int, w: int, Z: float) -> list[tuple[float, float]]:
+#     """
+#     Return (zoom, x-offset_px) key states for a Ken-Burns preset.
+#     `Z` is the randomly drawn zoom intensity (≈1.2-1.4).
+#     """
+#     # keep pans subtle: either use Z (already >1) or guarantee ≥1.05
+#     pan_zoom = max(Z, 1.05)
+
+#     # how far we can pan without showing black bars
+#     max_off = (w / pan_zoom - w) / -2.0
+#     half    = 0.5 * max_off           # a comfortable amount
+
+#     presets = {
+#         1: [(1.0,       0.0), (Z,        0.0)],      # centre zoom-IN
+#         2: [(Z,         0.0), (1.0,      0.0)],      # centre zoom-OUT
+#         3: [(pan_zoom, -half), (pan_zoom, +half)],   # pan L → R
+#         4: [(pan_zoom, +half), (pan_zoom, -half)],   # pan R → L
+#         5: [(1.0,      -half), (Z,       -half)],    # zoom-in on left third
+#         6: [(1.0,      +half), (Z,       +half)],    # zoom-in on right third
+#     }
+#     if preset_id not in presets:
+#         raise ValueError("ken_burns_preset must be 0 or 1–6.")
+#     return presets[preset_id]
 
 
 def build_kb_preset(preset_id: int, w: int, Z: float) -> list[tuple[float, float]]:
     """
-    Return (zoom, x-offset_px) key states for a Ken-Burns preset.
-    `Z` is the randomly drawn zoom intensity (≈1.2-1.4).
-    """
-    # keep pans subtle: either use Z (already >1) or guarantee ≥1.05
-    pan_zoom = max(Z, 1.05)
+    Return a list of (zoom, x-offset_px) key states for Ken-Burns presets.
 
-    # how far we can pan without showing black bars
-    max_off = (w / pan_zoom - w) / -2.0
-    half    = 0.5 * max_off           # a comfortable amount
+    Presets
+    -------
+      1  centre zoom-in
+      2  centre zoom-out
+      3  pan L → R
+      4  pan R → L
+      5  zoom-in on left third
+      6  zoom-in on right third
+    """
+    # A gentle zoom that is *just enough* to allow panning.
+    base_zoom = max(1.05, Z * 0.85)        # ≈ 1.05–1.2
+
+    # Helper to compute a safe half-offset for a given zoom.
+    def half_offset(zoom: float) -> float:
+        return 0.5 * (w / zoom - w) / -1.0   # positive pixels
+
+    half_base = half_offset(base_zoom)
+    half_Z    = half_offset(Z)
 
     presets = {
-        1: [(1.0,       0.0), (Z,        0.0)],      # centre zoom-IN
-        2: [(Z,         0.0), (1.0,      0.0)],      # centre zoom-OUT
-        3: [(pan_zoom, -half), (pan_zoom, +half)],   # pan L → R
-        4: [(pan_zoom, +half), (pan_zoom, -half)],   # pan R → L
-        5: [(1.0,      -half), (Z,       -half)],    # zoom-in on left third
-        6: [(1.0,      +half), (Z,       +half)],    # zoom-in on right third
+        1: [(1.0,        0.0), (Z,        0.0)],          # centre zoom-IN
+        2: [(Z,          0.0), (1.0,      0.0)],          # centre zoom-OUT
+        3: [(base_zoom, -half_base), (base_zoom, +half_base)],   # pan L→R
+        4: [(base_zoom, +half_base), (base_zoom, -half_base)],   # pan R→L
+        5: [(base_zoom, -half_base), (Z,        -half_Z)],       # side zoom-IN (left)
+        6: [(base_zoom, +half_base), (Z,        +half_Z)],       # side zoom-IN (right)
     }
     if preset_id not in presets:
         raise ValueError("ken_burns_preset must be 0 or 1–6.")
