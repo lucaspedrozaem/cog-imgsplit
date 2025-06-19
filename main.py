@@ -323,19 +323,27 @@ def create_caption_clip(
 
 
 def build_kb_preset(preset_id: int, w: int, Z: float) -> list[tuple[float, float]]:
-    max_off = (w / Z - w) / -2.0      # pan as far as the edge of the zoomed view
-    half    = 0.5 * max_off           # a bit gentler
+    """
+    Return (zoom, x-offset_px) key states for a Ken-Burns preset.
+    `Z` is the randomly drawn zoom intensity (≈1.2-1.4).
+    """
+    # keep pans subtle: either use Z (already >1) or guarantee ≥1.05
+    pan_zoom = max(Z, 1.05)
+
+    # how far we can pan without showing black bars
+    max_off = (w / pan_zoom - w) / -2.0
+    half    = 0.5 * max_off           # a comfortable amount
 
     presets = {
-        1: [(1.0, 0.0), (Z,   0.0)],                  # centre zoom-in
-        2: [(Z,   0.0), (1.0, 0.0)],                  # centre zoom-out
-        3: [(1.0, -half), (1.0, half)],               # pan left → right
-        4: [(1.0,  half), (1.0,-half)],               # pan right → left
-        5: [(1.0, -half), (Z,   -half)],              # zoom-in on left side
-        6: [(1.0,  half), (Z,    half)],              # zoom-in on right side
+        1: [(1.0,       0.0), (Z,        0.0)],      # centre zoom-IN
+        2: [(Z,         0.0), (1.0,      0.0)],      # centre zoom-OUT
+        3: [(pan_zoom, -half), (pan_zoom, +half)],   # pan L → R
+        4: [(pan_zoom, +half), (pan_zoom, -half)],   # pan R → L
+        5: [(1.0,      -half), (Z,       -half)],    # zoom-in on left third
+        6: [(1.0,      +half), (Z,       +half)],    # zoom-in on right third
     }
     if preset_id not in presets:
-        raise ValueError("Ken Burns preset must be 0 or 1–6.")
+        raise ValueError("ken_burns_preset must be 0 or 1–6.")
     return presets[preset_id]
 
 def smoothstep(u: float) -> float:
@@ -546,7 +554,7 @@ def apply_ken_burns_effect(
             if abs(prev_off) < 1e-2 and abs(curr_off) < 1e-2:  # both offsets zero
                 if curr_zoom - prev_zoom < 0.2:
                     key_states[i] = (prev_zoom + 0.2, curr_off)
-                    
+
     print("Debug: Final key states after duplicate removal and zoom adjustment:")
     for idx, state in enumerate(key_states):
         print(f"  State {idx}: Zoom = {state[0]:.3f}, Offset = {state[1]:.3f}")
