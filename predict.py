@@ -1,40 +1,40 @@
 # predict.py
 # ---------------------------------------------------------------
-# Cog predictor: plays a (optionally trimmed) listing video,
-# then appends a white outro where the logo fades in.
+# Cog predictor: downloads listing video + logo, optionally trims
+# the video, then appends a white outro where the logo fades in.
 # ---------------------------------------------------------------
 
 import os
 import tempfile
 from cog import BasePredictor, Input, Path
+from typing import Optional, Tuple  # for type hints
 from main import combine_video_and_logo, download_file
 
 
 class Predictor(BasePredictor):
-    """Downloads video + logo, adds branded outro, returns MP4."""
+    """Downloads inputs, adds branded outro, returns MP4."""
 
     def setup(self):
-        pass  # put heavy initialisation here if needed
+        pass  # heavy initialisation could go here
 
     def predict(
         self,
         video_url: str = Input(description="Public URL to the listing video (mp4/mov)."),
         logo_url: str = Input(description="Public URL to a transparent-background logo."),
         #
-        # NEW PARAM ➟ Trim or pad the input video to this length
+        # Optional trim length →
         #
         video_duration: float = Input(
             description=(
-                "Final length (seconds) to keep from the input video BEFORE "
-                "the outro is added. -- If 0, keep the full video. If the "
-                "video is shorter than this, it will be left as-is."
+                "Seconds to KEEP from the start of the input video BEFORE "
+                "the outro is added. Set to 0 to keep the full video."
             ),
             default=0.0,
             ge=0.0,
-            le=1_800.0,  # 30 minutes max
+            le=1800.0,  # 30 min max
         ),
         outro_duration: float = Input(
-            description="Length of the white logo-outro (seconds).",
+            description="Seconds for the white canvas outro.",
             default=3.0,
             ge=0.5,
             le=10.0,
@@ -53,13 +53,13 @@ class Predictor(BasePredictor):
         ),
         target_resolution: str = Input(
             description=(
-                "Optional output resolution WIDTHxHEIGHT, e.g. '1920x1080'. "
+                "Optional output resolution WIDTHxHEIGHT (e.g. '1920x1080'). "
                 "Leave blank to preserve original."
             ),
             default="",
         ),
         keep_audio: bool = Input(
-            description="Keep original audio track if present.",
+            description="Keep the original audio track if present.",
             default=True,
         ),
     ) -> Path:
@@ -72,7 +72,7 @@ class Predictor(BasePredictor):
         # -------------------------------------------------------
         # 2) Parse optional resolution
         # -------------------------------------------------------
-        target_res = None
+        target_res: Optional[Tuple[int, int]] = None
         if target_resolution:
             try:
                 w, h = map(int, target_resolution.lower().split("x"))
@@ -83,12 +83,12 @@ class Predictor(BasePredictor):
                 ) from e
 
         # -------------------------------------------------------
-        # 3) Temp output
+        # 3) Prepare a temp output file
         # -------------------------------------------------------
         output_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
 
         # -------------------------------------------------------
-        # 4) Combine video + logo (with trimming if requested)
+        # 4) Combine video + logo
         # -------------------------------------------------------
         combine_video_and_logo(
             video_path=video_path,

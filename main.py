@@ -1,9 +1,9 @@
 # main.py
 # ---------------------------------------------------------------
 # Utilities:
-#   – download_file()         : HTTP/HTTPS download helper
-#   – combine_video_and_logo(): trim listing video (optional),
-#                               then append white outro with fade-in logo
+#   – download_file()         : streamed HTTP/HTTPS download
+#   – combine_video_and_logo(): optional trim, then append white
+#                               outro with fading logo
 # ---------------------------------------------------------------
 
 import os
@@ -11,6 +11,8 @@ import mimetypes
 import tempfile
 import requests
 from urllib.parse import urlparse
+from typing import Optional, Tuple
+
 from moviepy.editor import (
     VideoFileClip,
     ImageClip,
@@ -19,7 +21,6 @@ from moviepy.editor import (
     concatenate_videoclips,
     vfx,
 )
-
 
 # ---------------------------------------------------------------
 # HTTP download helper
@@ -32,7 +33,7 @@ def download_file(url: str, *, chunk_size: int = 8192, timeout: int = 30) -> str
     except Exception as exc:
         raise RuntimeError(f"Failed to download {url!r}: {exc}") from exc
 
-    # Pick extension
+    # Choose extension: URL → MIME → .bin
     ext = os.path.splitext(urlparse(url).path)[1]
     if not ext:
         mime = resp.headers.get("content-type", "").split(";")[0].strip()
@@ -58,43 +59,37 @@ def combine_video_and_logo(
     video_path: str,
     logo_path: str,
     output_path: str,
-    #
-    # NEW ➟ optional trimming
-    #
-    video_duration: float | None = None,  # seconds to KEEP from start
+    video_duration: Optional[float] = None,          # seconds to KEEP
     outro_duration: float = 3.0,
     fade_duration: float = 1.5,
     logo_rel_width: float = 0.30,
-    target_resolution: tuple[int, int] | None = None,
+    target_resolution: Optional[Tuple[int, int]] = None,
     keep_audio: bool = True,
 ) -> None:
     """
-    Trim the input video to `video_duration` seconds (if provided),
-    then append a white canvas outro with a fading-in logo.
+    Optionally trim the listing video, then append a white canvas
+    outro and fade the logo in.
     """
-    # 1) Load main clip
+    # 1) Load listing video
     main_clip = VideoFileClip(video_path)
 
-    # Optional trim/pad
+    # Trim if requested
     if video_duration and video_duration > 0:
         if main_clip.duration >= video_duration:
             main_clip = main_clip.subclip(0, video_duration)
-        else:
-            # If shorter, simply leave it; you could pad with freeze-frame if desired.
-            pass
 
     # Optional resize
     if target_resolution:
         main_clip = main_clip.resize(newsize=target_resolution)
 
-    # Remove audio if requested
+    # Strip audio if desired
     if not keep_audio:
         main_clip = main_clip.without_audio()
 
     w, h = main_clip.size
     fps = main_clip.fps or 30
 
-    # 2) Build outro
+    # 2) Build white outro with fading logo
     bg = ColorClip(size=(w, h), color=(255, 255, 255), duration=outro_duration)
 
     logo = (
@@ -119,15 +114,14 @@ def combine_video_and_logo(
         threads=4,
     )
 
-    # 4) Clean up resources
+    # Release resources
     main_clip.close()
     outro.close()
     final.close()
 
 
 # ---------------------------------------------------------------
-# Optional CLI for local testing
-#   python main.py listing.mp4 logo.png output.mp4 7
+# CLI for quick local testing
 # ---------------------------------------------------------------
 if __name__ == "__main__":
     import sys
