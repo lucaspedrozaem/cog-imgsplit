@@ -1,110 +1,117 @@
+# predict.py
+#
+# Cog-style wrapper that:
+#   1. Downloads a listing video and a transparent-background logo
+#   2. Appends a white outro where the logo fades in
+#   3. Returns the finished MP4
+#
+# Heavy lifting lives in main.combine_video_and_logo().
+# ---------------------------------------------------------------------
+
 import os
 import tempfile
-import json
 from cog import BasePredictor, Input, Path
-from main import sync_videos_to_song, download_file
+from main import combine_video_and_logo, download_file
+
 
 class Predictor(BasePredictor):
+    """
+    Appends a clean white canvas outro to a real-estate video
+    and fades the agent’s logo in.
+    """
+
     def setup(self):
-        # Any expensive setup can be done here.
+        # Put any heavyweight, one-time initialisation here (GPU warm-up, etc.)
         pass
 
     def predict(
         self,
-        video_info: str = Input(
-            description="A JSON string representing a list of objects with keys 'url' and optional 'caption'.",
-            default='[{"url": "https://example.com/video.mp4", "caption": "Sample Caption"}]'
+        video_url: str = Input(
+            description="URL of the finished listing video (MP4, MOV, etc.).",
+            default="https://example.com/listing.mp4",
         ),
-        song_url: str = Input(
-            description="URL to the song (audio file).",
-            default="https://example.com/song.mp3"
+        logo_url: str = Input(
+            description="URL of the logo with transparent background (PNG/SVG/JPEG).",
+            default="https://example.com/logo.png",
         ),
-        loop_count: int = Input(
-            description="How many times to loop the input list.",
-            default=1
-        ),
-        aspect_ratio: str = Input(
-            description="Output aspect ratio (e.g. '16:9' or '9:16').",
-            default="16:9"
-        ),
-        do_trim: bool = Input(
-            description="Trim long song", default=False
-        ),
-        add_sub: bool = Input(
-            description="Add sub",
-            default=True,
-        ),
-        add_audio: bool = Input(
-            description="Add audio",
-            default=True,
-        ),
-        effect_hold: float = Input(
-            description="Hold effect",
-            default=0.5,
-            ge=0,
-            le=1,
-        ),
-        intensity_min: float = Input(
-            description="Intensity min",
-            default=1.2,
-            ge=0,
-            le=2,
-        ),
-        intensity_max: float = Input(
-            description="Intensity max",
-            default=1.4,
-            ge=0,
-            le=2,
-        ),
-        ideal_dur: float = Input(
-            description="Duration",
-            default=0.0,
-            ge=0,
+        outro_duration: float = Input(
+            description="Length of the white outro canvas (seconds).",
+            default=3.0,
+            ge=0.5,
             le=10,
         ),
+        fade_duration: float = Input(
+            description="Time the logo takes to fade in (seconds).",
+            default=1.5,
+            ge=0.2,
+            le=5,
+        ),
+        logo_rel_width: float = Input(
+            description="Logo width as a fraction of the video width (0–1).",
+            default=0.30,
+            ge=0.05,
+            le=1.0,
+        ),
         target_resolution: str = Input(
-            description="Output resolution in WIDTHxHEIGHT format (e.g. '1920x1080').",
-            default="1920x1080"
-        )
+            description=(
+                "Optional output resolution in WIDTHxHEIGHT format, e.g. '1920x1080'. "
+                "Leave blank to keep the original video resolution."
+            ),
+            default="",
+        ),
+        keep_audio: bool = Input(
+            description="Preserve the original audio track if present.",
+            default=True,
+        ),
     ) -> Path:
-        # Parse video_info JSON string into a list of dictionaries.
-        try:
-            video_info_parsed = json.loads(video_info)
-        except Exception as e:
-            raise ValueError("video_info must be a valid JSON string.") from e
+        """Download inputs, run combine_video_and_logo(), return path to final MP4."""
+        # ---------------------------------------------------------------------
+        # 1) Download assets
+        # ---------------------------------------------------------------------
+        video_path = download_file(video_url)
+        logo_path = download_file(logo_url)
 
-        # Parse target resolution string.
-        try:
-            width, height = map(int, target_resolution.lower().split("x"))
-        except Exception as e:
-            raise ValueError("target_resolution must be in WIDTHxHEIGHT format, e.g. '1920x1080'.") from e
-        target_resolution_tuple = (width, height)
-        
-        # Download the song file.
-        song_file_path = download_file(song_url)
-        
-        # Create a temporary output file.
-        output_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-        
-        # Run the media-processing function.
-        sync_videos_to_song(
-            video_info_parsed,
-            song_file_path,
-            do_trim,
-            effect_hold,
-            intensity_min,
-            intensity_max,
-            add_sub,
-            add_audio,
-            output_file,
-            loop_count=loop_count,
-            aspect_ratio=aspect_ratio,
+        # ---------------------------------------------------------------------
+        # 2) Parse optional resolution
+        # ---------------------------------------------------------------------
+        target_resolution_tuple = None
+        if target_resolution:
+            try:
+                width, height = map(int, target_resolution.lower().split("x"))
+                target_resolution_tuple = (width, height)
+            except Exception as e:
+                raise ValueError(
+                    "target_resolution must be in WIDTHxHEIGHT format, e.g. '1920x1080'."
+                ) from e
+
+        # ---------------------------------------------------------------------
+        # 3) Temp file for the finished video
+        # ---------------------------------------------------------------------
+        output_file = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".mp4"
+        ).name
+
+        # ---------------------------------------------------------------------
+        # 4) Combine video + logo
+        # ---------------------------------------------------------------------
+        combine_video_and_logo(
+            video_path=video_path,
+            logo_path=logo_path,
+            output_path=output_file,
+            outro_duration=outro_duration,
+            fade_duration=fade_duration,
+            logo_rel_width=logo_rel_width,
             target_resolution=target_resolution_tuple,
-            ideal_dur=ideal_dur
+            keep_audio=keep_audio,
         )
-        
-        # Clean up the downloaded song file.
-        os.remove(song_file_path)
-        
-        # Return the path to the output video.
+
+        # ---------------------------------------------------------------------
+        # 5) Clean up downloads
+        # ---------------------------------------------------------------------
+        os.remove(video_path)
+        os.remove(logo_path)
+
+        # ---------------------------------------------------------------------
+        # 6) Return path to final MP4
+        # ---------------------------------------------------------------------
         return Path(output_file)
