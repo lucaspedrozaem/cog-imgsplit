@@ -92,12 +92,14 @@ def combine_video_and_logo(
     # 2) Build white outro with fading logo
     bg = ColorClip(size=(w, h), color=(255, 255, 255), duration=outro_duration)
 
+
     logo = (
         ImageClip(logo_path, transparent=True)
         .resize(width=int(w * logo_rel_width))
         .set_duration(outro_duration)
         .set_pos("center")
-        .fx(vfx.fadein, fade_duration)
+        # Fade in from **white** instead of black  ↓↓↓
+        .fx(vfx.fadein, fade_duration, initial_color=(255, 255, 255))
     )
 
     outro = CompositeVideoClip([bg, logo])
