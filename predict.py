@@ -71,6 +71,10 @@ class Predictor(BasePredictor):
         # 1) Download assets
         # -------------------------------------------------------
         video_path: Optional[str] = None
+
+        if video_url == "null":
+            video_url = None
+
         if video_url.strip():
             video_path = download_file(video_url)
 
