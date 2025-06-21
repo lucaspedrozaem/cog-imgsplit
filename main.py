@@ -33,7 +33,7 @@ def download_file(url: str, *, chunk_size: int = 8192, timeout: int = 30) -> str
     except Exception as exc:
         raise RuntimeError(f"Failed to download {url!r}: {exc}") from exc
 
-    # Choose extension: URL → MIME → .bin
+    # Extension from URL → MIME → .bin fallback
     ext = os.path.splitext(urlparse(url).path)[1]
     if not ext:
         mime = resp.headers.get("content-type", "").split(";")[0].strip()
@@ -56,10 +56,10 @@ def download_file(url: str, *, chunk_size: int = 8192, timeout: int = 30) -> str
 # ---------------------------------------------------------------
 def combine_video_and_logo(
     *,
-    video_path: str,
+    video_path: Optional[str],                 # ← may be None
     logo_path: str,
     output_path: str,
-    video_duration: Optional[float] = None,          # seconds to KEEP
+    video_duration: Optional[float] = None,    # seconds to KEEP
     outro_duration: float = 3.0,
     fade_duration: float = 1.5,
     logo_rel_width: float = 0.30,
@@ -67,77 +67,98 @@ def combine_video_and_logo(
     keep_audio: bool = True,
 ) -> None:
     """
-    Optionally trim the listing video, then append a white canvas
-    outro and fade the logo in.
+    If `video_path` is provided → trim / resize then append white outro.
+    If `video_path` is None → render only the white-logo outro.
     """
-    # 1) Load listing video
-    main_clip = VideoFileClip(video_path)
+    clips = []
 
-    # Trim if requested
-    if video_duration and video_duration > 0:
-        if main_clip.duration >= video_duration:
-            main_clip = main_clip.subclip(0, video_duration)
+    # ---------------------------- main listing video (optional)
+    if video_path:
+        listing = VideoFileClip(video_path)
 
-    # Optional resize
-    if target_resolution:
-        main_clip = main_clip.resize(newsize=target_resolution)
+        # Trim
+        if video_duration and video_duration > 0 and listing.duration >= video_duration:
+            listing = listing.subclip(0, video_duration)
 
-    # Strip audio if desired
-    if not keep_audio:
-        main_clip = main_clip.without_audio()
+        # Resize
+        if target_resolution:
+            listing = listing.resize(newsize=target_resolution)
 
-    w, h = main_clip.size
-    fps = main_clip.fps or 30
+        # Audio
+        if not keep_audio:
+            listing = listing.without_audio()
 
-    # 2) Build white outro with fading logo
-    bg = ColorClip(size=(w, h), color=(255, 255, 255), duration=outro_duration)
+        clips.append(listing)
+        base_w, base_h = listing.size
+        fps = listing.fps or 30
+    else:
+        # No listing video supplied
+        if target_resolution:
+            base_w, base_h = target_resolution
+        else:
+            base_w, base_h = (1920, 1080)
+        fps = 30
 
+    # ---------------------------- build white outro + fading logo
+    bg = ColorClip(size=(base_w, base_h), color=(255, 255, 255), duration=outro_duration)
 
     logo = (
         ImageClip(logo_path, transparent=True)
-        .resize(width=int(w * logo_rel_width))
+        .resize(width=int(base_w * logo_rel_width))
         .set_duration(outro_duration)
         .set_pos("center")
-        # Fade in from **white** instead of black  ↓↓↓
         .fx(vfx.fadein, fade_duration, initial_color=(255, 255, 255))
     )
 
-    outro = CompositeVideoClip([bg, logo])
+    outro_clip = CompositeVideoClip([bg, logo])
+    clips.append(outro_clip)
 
-    # 3) Concatenate and export
-    final = concatenate_videoclips([main_clip, outro], method="compose")
+    # ---------------------------- concatenate & export
+    final = clips[0] if len(clips) == 1 else concatenate_videoclips(clips, method="compose")
 
     final.write_videofile(
         output_path,
         fps=fps,
         codec="libx264",
-        audio_codec="aac" if keep_audio else None,
+        audio_codec="aac" if keep_audio and video_path else None,
         preset="medium",
         threads=4,
     )
 
-    # Release resources
-    main_clip.close()
-    outro.close()
+    # Cleanup
+    outro_clip.close()
     final.close()
+    if video_path:
+        listing.close()
 
 
 # ---------------------------------------------------------------
-# CLI for quick local testing
+# CLI for local testing
 # ---------------------------------------------------------------
 if __name__ == "__main__":
     import sys
 
-    if not (4 <= len(sys.argv) <= 5):
-        print(
-            "Usage: python main.py <video.mp4> <logo.png> <output.mp4> "
-            "[trim_seconds]"
-        )
+    usage = (
+        "Usage:\n"
+        "  python main.py <logo.png> <output.mp4>                   # logo-only outro\n"
+        "  python main.py <video.mp4> <logo.png> <output.mp4>        # full flow\n"
+        "  python main.py <video.mp4> <logo.png> <output.mp4> <trim_seconds>"
+    )
+
+    if len(sys.argv) not in (3, 4, 5):
+        print(usage)
         sys.exit(1)
 
-    combine_video_and_logo(
-        video_path=sys.argv[1],
-        logo_path=sys.argv[2],
-        output_path=sys.argv[3],
-        video_duration=float(sys.argv[4]) if len(sys.argv) == 5 else None,
-    )
+    if len(sys.argv) == 3:  # logo only
+        combine_video_and_logo(
+            video_path=None,
+            logo_path=sys.argv[1],
+            output_path=sys.argv[2],
+        )
+    else:
+        combine_video_and_logo(
+            video_path=sys.argv[1],
+            logo_path=sys.argv[2],
+            output_path=sys.argv[3],
+            video_duration=float(sys.argv[4]) if len(sys.argv) == 5 else None,
+        )
