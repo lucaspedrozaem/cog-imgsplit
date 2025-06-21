@@ -16,7 +16,7 @@ class Predictor(BasePredictor):
     """Download assets, add branded outro, return an MP4."""
 
     def setup(self):
-        pass  # heavy initialisation if required
+        pass
 
     def predict(
         self,
@@ -30,7 +30,6 @@ class Predictor(BasePredictor):
         logo_url: str = Input(
             description="Public URL to a transparent-background logo."
         ),
-        # --- customisation inputs ---
         video_duration: float = Input(
             description="Seconds to KEEP from listing video before outro (0 = full).",
             default=0.0,
@@ -67,22 +66,14 @@ class Predictor(BasePredictor):
             default=True,
         ),
     ) -> Path:
-        # -------------------------------------------------------
         # 1) Download assets
-        # -------------------------------------------------------
         video_path: Optional[str] = None
-
-        if video_url == "null":
-            video_url = ""
-
         if video_url.strip():
             video_path = download_file(video_url)
 
         logo_path = download_file(logo_url)
 
-        # -------------------------------------------------------
-        # 2) Parse target resolution
-        # -------------------------------------------------------
+        # 2) Parse resolution
         target_res: Optional[Tuple[int, int]] = None
         if target_resolution:
             try:
@@ -93,19 +84,15 @@ class Predictor(BasePredictor):
                     "target_resolution must be WIDTHxHEIGHT, e.g. '1920x1080'."
                 ) from e
 
-        # -------------------------------------------------------
-        # 3) Temp output file
-        # -------------------------------------------------------
+        # 3) Temp output
         output_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
 
-        # -------------------------------------------------------
         # 4) Combine
-        # -------------------------------------------------------
         combine_video_and_logo(
             video_path=video_path,                       # may be None
             logo_path=logo_path,
             output_path=output_file,
-            video_duration=video_duration if video_duration > 0 else None,
+            video_duration=video_duration or None,
             outro_duration=outro_duration,
             fade_duration=fade_duration,
             logo_rel_width=logo_rel_width,
@@ -113,9 +100,7 @@ class Predictor(BasePredictor):
             keep_audio=keep_audio,
         )
 
-        # -------------------------------------------------------
         # 5) Clean-up
-        # -------------------------------------------------------
         if video_path:
             os.remove(video_path)
         os.remove(logo_path)

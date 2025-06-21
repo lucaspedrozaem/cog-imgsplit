@@ -3,7 +3,7 @@
 # Utilities:
 #   – download_file()         : streamed HTTP/HTTPS download
 #   – combine_video_and_logo(): optional trim, then append white
-#                               outro with fading logo
+#                               outro with fading logo (PNG alpha kept)
 # ---------------------------------------------------------------
 
 import os
@@ -13,6 +13,8 @@ import requests
 from urllib.parse import urlparse
 from typing import Optional, Tuple
 
+import numpy as np
+from PIL import Image                                  # ← NEW
 from moviepy.editor import (
     VideoFileClip,
     ImageClip,
@@ -33,7 +35,6 @@ def download_file(url: str, *, chunk_size: int = 8192, timeout: int = 30) -> str
     except Exception as exc:
         raise RuntimeError(f"Failed to download {url!r}: {exc}") from exc
 
-    # Extension from URL → MIME → .bin fallback
     ext = os.path.splitext(urlparse(url).path)[1]
     if not ext:
         mime = resp.headers.get("content-type", "").split(";")[0].strip()
@@ -52,14 +53,43 @@ def download_file(url: str, *, chunk_size: int = 8192, timeout: int = 30) -> str
 
 
 # ---------------------------------------------------------------
+# Helper: build an ImageClip that respects PNG transparency
+# ---------------------------------------------------------------
+def _make_logo_clip(
+    logo_path: str,
+    duration: float,
+    width_px: int,
+    fade_duration: float,
+) -> ImageClip:
+    """
+    Read a PNG/SVG/JPEG, keep alpha if present, resize to width_px,
+    and return an ImageClip that fades in from white.
+    """
+    img = Image.open(logo_path).convert("RGBA")
+    rgb = np.array(img)[..., :3]             # (h, w, 3)
+    alpha = np.array(img)[..., 3] / 255.0    # (h, w) 0-1
+
+    rgb_clip = ImageClip(rgb).set_duration(duration)
+    mask_clip = ImageClip(alpha, ismask=True).set_duration(duration)
+
+    logo_clip = (
+        rgb_clip.set_mask(mask_clip)
+        .resize(width=width_px)
+        .set_pos("center")
+        .fx(vfx.fadein, fade_duration, initial_color=(255, 255, 255))
+    )
+    return logo_clip
+
+
+# ---------------------------------------------------------------
 # Core video-processing
 # ---------------------------------------------------------------
 def combine_video_and_logo(
     *,
-    video_path: Optional[str],                 # ← may be None
+    video_path: Optional[str],
     logo_path: str,
     output_path: str,
-    video_duration: Optional[float] = None,    # seconds to KEEP
+    video_duration: Optional[float] = None,
     outro_duration: float = 3.0,
     fade_duration: float = 1.5,
     logo_rel_width: float = 0.30,
@@ -67,24 +97,21 @@ def combine_video_and_logo(
     keep_audio: bool = True,
 ) -> None:
     """
-    If `video_path` is provided → trim / resize then append white outro.
+    If `video_path` is supplied → trim/resize then append white outro.
     If `video_path` is None → render only the white-logo outro.
     """
     clips = []
 
-    # ---------------------------- main listing video (optional)
+    # ---------------- main listing video (optional)
     if video_path:
         listing = VideoFileClip(video_path)
 
-        # Trim
         if video_duration and video_duration > 0 and listing.duration >= video_duration:
             listing = listing.subclip(0, video_duration)
 
-        # Resize
         if target_resolution:
             listing = listing.resize(newsize=target_resolution)
 
-        # Audio
         if not keep_audio:
             listing = listing.without_audio()
 
@@ -92,28 +119,23 @@ def combine_video_and_logo(
         base_w, base_h = listing.size
         fps = listing.fps or 30
     else:
-        # No listing video supplied
-        if target_resolution:
-            base_w, base_h = target_resolution
-        else:
-            base_w, base_h = (1920, 1080)
+        base_w, base_h = target_resolution or (1920, 1080)
         fps = 30
 
-    # ---------------------------- build white outro + fading logo
+    # ---------------- white outro + fading logo (alpha-safe)
     bg = ColorClip(size=(base_w, base_h), color=(255, 255, 255), duration=outro_duration)
 
-    logo = (
-        ImageClip(logo_path, transparent=True)
-        .resize(width=int(base_w * logo_rel_width))
-        .set_duration(outro_duration)
-        .set_pos("center")
-        .fx(vfx.fadein, fade_duration, initial_color=(255, 255, 255))
+    logo = _make_logo_clip(
+        logo_path,
+        duration=outro_duration,
+        width_px=int(base_w * logo_rel_width),
+        fade_duration=fade_duration,
     )
 
     outro_clip = CompositeVideoClip([bg, logo])
     clips.append(outro_clip)
 
-    # ---------------------------- concatenate & export
+    # ---------------- concatenate & export
     final = clips[0] if len(clips) == 1 else concatenate_videoclips(clips, method="compose")
 
     final.write_videofile(
@@ -125,7 +147,6 @@ def combine_video_and_logo(
         threads=4,
     )
 
-    # Cleanup
     outro_clip.close()
     final.close()
     if video_path:
@@ -133,23 +154,21 @@ def combine_video_and_logo(
 
 
 # ---------------------------------------------------------------
-# CLI for local testing
+# CLI for quick local test
 # ---------------------------------------------------------------
 if __name__ == "__main__":
     import sys
 
-    usage = (
-        "Usage:\n"
-        "  python main.py <logo.png> <output.mp4>                   # logo-only outro\n"
-        "  python main.py <video.mp4> <logo.png> <output.mp4>        # full flow\n"
-        "  python main.py <video.mp4> <logo.png> <output.mp4> <trim_seconds>"
-    )
-
     if len(sys.argv) not in (3, 4, 5):
-        print(usage)
+        print(
+            "logo-only:\n"
+            "  python main.py <logo.png> <output.mp4>\n\n"
+            "listing + logo:\n"
+            "  python main.py <video.mp4> <logo.png> <output.mp4> [trim_seconds]"
+        )
         sys.exit(1)
 
-    if len(sys.argv) == 3:  # logo only
+    if len(sys.argv) == 3:
         combine_video_and_logo(
             video_path=None,
             logo_path=sys.argv[1],
