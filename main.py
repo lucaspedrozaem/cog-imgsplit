@@ -2,8 +2,9 @@
 # ---------------------------------------------------------------
 # Utilities:
 #   – download_file()         : streamed HTTP/HTTPS download
-#   – combine_video_and_logo(): optional trim, then append white
-#                               outro with fading logo (PNG alpha kept)
+#   – combine_video_and_logo(): optional trim, then append outro
+#                               with auto‑picked background and
+#                               smooth fade‑in logo (alpha‑safe)
 # ---------------------------------------------------------------
 
 import os
@@ -14,7 +15,7 @@ from urllib.parse import urlparse
 from typing import Optional, Tuple
 
 import numpy as np
-from PIL import Image                                  # ← NEW
+from PIL import Image
 from moviepy.editor import (
     VideoFileClip,
     ImageClip,
@@ -27,6 +28,7 @@ from moviepy.editor import (
 # ---------------------------------------------------------------
 # HTTP download helper
 # ---------------------------------------------------------------
+
 def download_file(url: str, *, chunk_size: int = 8192, timeout: int = 30) -> str:
     """Stream a remote file to /tmp and return its local path."""
     try:
@@ -53,32 +55,47 @@ def download_file(url: str, *, chunk_size: int = 8192, timeout: int = 30) -> str
 
 
 # ---------------------------------------------------------------
-# Helper: decide if a logo needs a dark background
+# Helper: decide if a transparent logo needs a dark background
 # ---------------------------------------------------------------
-def _logo_is_light(logo_path: str,
-                   brightness_thresh: float = 0.8,
-                   light_ratio_thresh: float = 0.7) -> bool:
+
+def _logo_needs_dark_bg(
+    logo_path: str,
+    *,
+    transparent_px_ratio_thresh: float = 0.02,  # ≥ 2 % transparent → "has alpha"
+    brightness_thresh: float = 0.8,
+    light_ratio_thresh: float = 0.7,
+) -> bool:
     """
-    Return True if the *visible* pixels of the PNG are mostly light
-    (i.e. you'd lose them on a white canvas).
+    Return **True** only when both conditions hold:
+    1. The image has a non‑trivial transparent region; AND
+    2. The visible (opaque) pixels are mostly light – they would vanish on white.
+
+    If the asset is fully opaque (i.e. its own white background is baked in)
+    we keep the default white canvas.
     """
     img = Image.open(logo_path).convert("RGBA")
     arr = np.asarray(img)
-    alpha = arr[..., 3] > 20                 # ignore almost-transparent pixels
-    if not alpha.any():
-        return False                         # fully transparent → doesn't matter
 
-    rgb = arr[alpha][..., :3] / 255.0
-    # Per-Rec. 601 luma
-    luma = (0.2126 * rgb[:, 0] +
-            0.7152 * rgb[:, 1] +
-            0.0722 * rgb[:, 2])
+    # 1) Check transparency -------------------------------------------------
+    alpha = arr[..., 3]
+    transparent_ratio = (alpha < 250).mean()       # allow slight compression noise
+    if transparent_ratio < transparent_px_ratio_thresh:
+        return False  # solid background → stick with white canvas
+
+    # 2) Check brightness of visible pixels ---------------------------------
+    visible = alpha > 20
+    if not visible.any():
+        return False  # edge‑case: fully transparent logo → ignore
+
+    rgb = arr[visible][..., :3] / 255.0
+    luma = 0.2126 * rgb[:, 0] + 0.7152 * rgb[:, 1] + 0.0722 * rgb[:, 2]
     return (luma > brightness_thresh).mean() > light_ratio_thresh
 
 
 # ---------------------------------------------------------------
-# updated: build an ImageClip that respects PNG transparency
+# Helper: build an ImageClip that respects PNG transparency
 # ---------------------------------------------------------------
+
 def _make_logo_clip(
     logo_path: str,
     duration: float,
@@ -87,28 +104,28 @@ def _make_logo_clip(
     bg_color: Tuple[int, int, int],
 ) -> ImageClip:
     """
-    Read a PNG/SVG/JPEG, keep alpha if present, resize to width_px,
-    and return an ImageClip that fades in from bg_color.
+    Read a PNG/SVG/JPEG, keep alpha if present, resize to `width_px`, and
+    return an ImageClip that fades in from `bg_color`.
     """
     img = Image.open(logo_path).convert("RGBA")
     rgb = np.array(img)[..., :3]
     alpha = np.array(img)[..., 3] / 255.0
 
-    logo_rgb = ImageClip(rgb).set_duration(duration)
-    logo_mask = ImageClip(alpha, ismask=True).set_duration(duration)
+    rgb_clip = ImageClip(rgb).set_duration(duration)
+    mask_clip = ImageClip(alpha, ismask=True).set_duration(duration)
 
-    logo_clip = (
-        logo_rgb.set_mask(logo_mask)
+    return (
+        rgb_clip.set_mask(mask_clip)
         .resize(width=width_px)
         .set_pos("center")
         .fx(vfx.fadein, fade_duration, initial_color=bg_color)
     )
-    return logo_clip
 
 
 # ---------------------------------------------------------------
-# Core video-processing
+# Core video‑processing
 # ---------------------------------------------------------------
+
 def combine_video_and_logo(
     *,
     video_path: Optional[str],
@@ -120,20 +137,26 @@ def combine_video_and_logo(
     logo_rel_width: float = 0.30,
     target_resolution: Optional[Tuple[int, int]] = None,
     keep_audio: bool = True,
-    bg_color: Optional[Tuple[int, int, int]] = None,   # <-- new
+    bg_color: Optional[Tuple[int, int, int]] = None,
 ) -> None:
     """
-    If bg_color is None we'll analyse the logo:
-        • mostly-light logo  → use black canvas (0,0,0)
-        • otherwise          → use white canvas (255,255,255)
+    Create a video that ends with a solid‑colour outro where the logo fades in.
+
+    • If `video_path` is provided, it is optionally trimmed/resized before the outro.
+    • If `video_path` is None, only the outro is rendered.
+
+    Background colour picking order:
+        1. Explicit `bg_color` parameter.
+        2. Auto‑detect – black if the logo is transparent *and* mostly light;
+           otherwise white.
     """
     # Decide canvas colour ---------------------------------------------------
     if bg_color is None:
-        bg_color = (0, 0, 0) if _logo_is_light(logo_path) else (255, 255, 255)
+        bg_color = (0, 0, 0) if _logo_needs_dark_bg(logo_path) else (255, 255, 255)
 
     clips = []
 
-    # ---------------- main listing video (optional)
+    # ---------------- main listing video (optional) -------------------------
     if video_path:
         listing = VideoFileClip(video_path)
 
@@ -153,7 +176,7 @@ def combine_video_and_logo(
         base_w, base_h = target_resolution or (1920, 1080)
         fps = 30
 
-    # ---------------- outro background + fading logo
+    # ---------------- outro background + fading logo ------------------------
     bg = ColorClip(size=(base_w, base_h), color=bg_color, duration=outro_duration)
 
     logo = _make_logo_clip(
@@ -161,13 +184,13 @@ def combine_video_and_logo(
         duration=outro_duration,
         width_px=int(base_w * logo_rel_width),
         fade_duration=fade_duration,
-        bg_color=bg_color,                # keep fade-in consistent
+        bg_color=bg_color,
     )
 
     outro_clip = CompositeVideoClip([bg, logo])
     clips.append(outro_clip)
 
-    # ---------------- concatenate & export
+    # ---------------- concatenate & export ----------------------------------
     final = clips[0] if len(clips) == 1 else concatenate_videoclips(clips, method="compose")
 
     final.write_videofile(
@@ -179,12 +202,11 @@ def combine_video_and_logo(
         threads=4,
     )
 
-    # tidy up
+    # ---------------- tidy up ----------------------------------------------
     outro_clip.close()
     final.close()
     if video_path:
         listing.close()
-
 
 
 # ---------------------------------------------------------------
@@ -195,7 +217,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) not in (3, 4, 5):
         print(
-            "logo-only:\n"
+            "logo‑only:\n"
             "  python main.py <logo.png> <output.mp4>\n\n"
             "listing + logo:\n"
             "  python main.py <video.mp4> <logo.png> <output.mp4> [trim_seconds]"
