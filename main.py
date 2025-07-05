@@ -53,30 +53,55 @@ def download_file(url: str, *, chunk_size: int = 8192, timeout: int = 30) -> str
 
 
 # ---------------------------------------------------------------
-# Helper: build an ImageClip that respects PNG transparency
+# Helper: decide if a logo needs a dark background
+# ---------------------------------------------------------------
+def _logo_is_light(logo_path: str,
+                   brightness_thresh: float = 0.8,
+                   light_ratio_thresh: float = 0.7) -> bool:
+    """
+    Return True if the *visible* pixels of the PNG are mostly light
+    (i.e. you'd lose them on a white canvas).
+    """
+    img = Image.open(logo_path).convert("RGBA")
+    arr = np.asarray(img)
+    alpha = arr[..., 3] > 20                 # ignore almost-transparent pixels
+    if not alpha.any():
+        return False                         # fully transparent → doesn't matter
+
+    rgb = arr[alpha][..., :3] / 255.0
+    # Per-Rec. 601 luma
+    luma = (0.2126 * rgb[:, 0] +
+            0.7152 * rgb[:, 1] +
+            0.0722 * rgb[:, 2])
+    return (luma > brightness_thresh).mean() > light_ratio_thresh
+
+
+# ---------------------------------------------------------------
+# updated: build an ImageClip that respects PNG transparency
 # ---------------------------------------------------------------
 def _make_logo_clip(
     logo_path: str,
     duration: float,
     width_px: int,
     fade_duration: float,
+    bg_color: Tuple[int, int, int],
 ) -> ImageClip:
     """
     Read a PNG/SVG/JPEG, keep alpha if present, resize to width_px,
-    and return an ImageClip that fades in from white.
+    and return an ImageClip that fades in from bg_color.
     """
     img = Image.open(logo_path).convert("RGBA")
-    rgb = np.array(img)[..., :3]             # (h, w, 3)
-    alpha = np.array(img)[..., 3] / 255.0    # (h, w) 0-1
+    rgb = np.array(img)[..., :3]
+    alpha = np.array(img)[..., 3] / 255.0
 
-    rgb_clip = ImageClip(rgb).set_duration(duration)
-    mask_clip = ImageClip(alpha, ismask=True).set_duration(duration)
+    logo_rgb = ImageClip(rgb).set_duration(duration)
+    logo_mask = ImageClip(alpha, ismask=True).set_duration(duration)
 
     logo_clip = (
-        rgb_clip.set_mask(mask_clip)
+        logo_rgb.set_mask(logo_mask)
         .resize(width=width_px)
         .set_pos("center")
-        .fx(vfx.fadein, fade_duration, initial_color=(255, 255, 255))
+        .fx(vfx.fadein, fade_duration, initial_color=bg_color)
     )
     return logo_clip
 
@@ -95,11 +120,17 @@ def combine_video_and_logo(
     logo_rel_width: float = 0.30,
     target_resolution: Optional[Tuple[int, int]] = None,
     keep_audio: bool = True,
+    bg_color: Optional[Tuple[int, int, int]] = None,   # <-- new
 ) -> None:
     """
-    If `video_path` is supplied → trim/resize then append white outro.
-    If `video_path` is None → render only the white-logo outro.
+    If bg_color is None we'll analyse the logo:
+        • mostly-light logo  → use black canvas (0,0,0)
+        • otherwise          → use white canvas (255,255,255)
     """
+    # Decide canvas colour ---------------------------------------------------
+    if bg_color is None:
+        bg_color = (0, 0, 0) if _logo_is_light(logo_path) else (255, 255, 255)
+
     clips = []
 
     # ---------------- main listing video (optional)
@@ -122,14 +153,15 @@ def combine_video_and_logo(
         base_w, base_h = target_resolution or (1920, 1080)
         fps = 30
 
-    # ---------------- white outro + fading logo (alpha-safe)
-    bg = ColorClip(size=(base_w, base_h), color=(255, 255, 255), duration=outro_duration)
+    # ---------------- outro background + fading logo
+    bg = ColorClip(size=(base_w, base_h), color=bg_color, duration=outro_duration)
 
     logo = _make_logo_clip(
         logo_path,
         duration=outro_duration,
         width_px=int(base_w * logo_rel_width),
         fade_duration=fade_duration,
+        bg_color=bg_color,                # keep fade-in consistent
     )
 
     outro_clip = CompositeVideoClip([bg, logo])
@@ -147,10 +179,12 @@ def combine_video_and_logo(
         threads=4,
     )
 
+    # tidy up
     outro_clip.close()
     final.close()
     if video_path:
         listing.close()
+
 
 
 # ---------------------------------------------------------------
