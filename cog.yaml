@@ -1,15 +1,12 @@
+# cog.yaml
 build:
-  python_version: "3.9"
+  gpu: false
+  python_version: "3.11"
   system_packages:
-    - "ffmpeg"             # Ensure ffmpeg is installed for MoviePy
-    - "libgl1-mesa-glx"    # For image processing (if needed)
+    - "libgl1-mesa-glx"
+    - "libglib2.0-0"
   python_packages:
-    - fastapi
-    - uvicorn
-    - moviepy==1.0.3
-    - librosa
-    - numpy
-    - requests
-    - pillow
-    - opencv-python
+    - "numpy==1.26.4"
+    - "opencv-python-headless==4.9.0.80"
+
 predict: "predict.py:Predictor"

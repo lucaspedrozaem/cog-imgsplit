@@ -1,8 +1,2 @@
-fastapi
-uvicorn
-moviepy==1.0.3
-librosa
-numpy
-requests
-pillow
-opencv-python
+numpy==1.26.4
+opencv-python-headless==4.9.0.80

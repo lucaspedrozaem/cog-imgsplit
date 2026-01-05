@@ -1,112 +1,135 @@
 # predict.py
-# ---------------------------------------------------------------
-# Cog predictor: optional listing video + white-logo outro render
-# ---------------------------------------------------------------
-
+import cv2
+import numpy as np
 import os
 import tempfile
-from typing import Optional, Tuple
-
+import shutil
+from typing import List
 from cog import BasePredictor, Input, Path
 
-from main import combine_video_and_logo, download_file
-
-
 class Predictor(BasePredictor):
-    """Download assets, add branded outro, return an MP4."""
-
     def setup(self):
+        """Load necessary libraries or models (none needed for standard OpenCV)"""
         pass
 
     def predict(
         self,
-        video_url: str = Input(
-            description=(
-                "Public URL to the listing video (leave blank to render only "
-                "the logo outro)."
-            ),
-            default="",
+        image: Path = Input(description="Input image containing the photo grid"),
+        threshold_value: int = Input(
+            description="Brightness threshold (0-255). Pixels brighter than this count as background.",
+            default=230,
+            ge=0, le=255
         ),
-        logo_url: str = Input(
-            description="Public URL to a transparent-background logo."
+        min_height_ratio: float = Input(
+            description="Minimum height of a detected photo relative to total image height (0.2 = 20%).",
+            default=0.20,
+            ge=0.01, le=1.0
         ),
-        video_duration: float = Input(
-            description="Seconds to KEEP from listing video before outro (0 = full).",
-            default=0.0,
-            ge=0.0,
-            le=1_800.0,
-        ),
-        outro_duration: float = Input(
-            description="Seconds for the white canvas outro.",
-            default=3.0,
-            ge=0.5,
-            le=10.0,
-        ),
-        fade_duration: float = Input(
-            description="Seconds the logo takes to fade in.",
-            default=1.5,
-            ge=0.2,
-            le=5.0,
-        ),
-        logo_rel_width: float = Input(
-            description="Logo width as a fraction of video width (0-1).",
-            default=0.30,
-            ge=0.05,
-            le=1.0,
-        ),
-        target_resolution: str = Input(
-            description=(
-                "Output resolution WIDTHxHEIGHT (e.g. '1920x1080'). "
-                "Leave blank to keep original / default."
-            ),
-            default="",
-        ),
-        keep_audio: bool = Input(
-            description="Keep original audio if listing video is provided.",
-            default=True,
-        ),
-    ) -> Path:
-        # 1) Download assets
-        video_path: Optional[str] = None
-        
-        if video_url == "null":
-            video_url = ""
-
-        if video_url.strip():
-            video_path = download_file(video_url)
-
-        logo_path = download_file(logo_url)
-
-        # 2) Parse resolution
-        target_res: Optional[Tuple[int, int]] = None
-        if target_resolution:
-            try:
-                w, h = map(int, target_resolution.lower().split("x"))
-                target_res = (w, h)
-            except Exception as e:
-                raise ValueError(
-                    "target_resolution must be WIDTHxHEIGHT, e.g. '1920x1080'."
-                ) from e
-
-        # 3) Temp output
-        output_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False).name
-
-        # 4) Combine
-        combine_video_and_logo(
-            video_path=video_path,                       # may be None
-            logo_path=logo_path,
-            output_path=output_file,
-            video_duration=video_duration or None,
-            outro_duration=outro_duration,
-            fade_duration=fade_duration,
-            logo_rel_width=logo_rel_width,
-            target_resolution=target_res,
-            keep_audio=keep_audio,
+        padding: int = Input(
+            description="Padding pixels to add back to the cropped area.",
+            default=6
         )
+    ) -> List[Path]:
+        """
+        Process the image to detect vertical photos on white background
+        and return them as a list of cropped images.
+        """
+        
+        # 1. Load Image
+        # Convert Cog Path to string for cv2
+        img_path = str(image)
+        img = cv2.imread(img_path)
+        
+        if img is None:
+            raise ValueError(f"Could not load image at {img_path}")
 
-        # 5) Clean-up
-        if video_path:
-            os.remove(video_path)
-        os.remove(logo_path)
+        img_h, img_w = img.shape[:2]
 
-        return Path(output_file)
+        # 2. Convert to Grayscale
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # 3. Inverse Thresholding
+        # Background (>threshold) becomes Black. Photos (<threshold) become White.
+        _, thresh = cv2.threshold(gray, threshold_value, 255, cv2.THRESH_BINARY_INV)
+
+        # 4. Morphological Clean-up
+        kernel_fill = np.ones((3, 3), np.uint8)
+        thresh = cv2.dilate(thresh, kernel_fill, iterations=2)
+        
+        kernel_sep = np.ones((3, 3), np.uint8)
+        thresh = cv2.erode(thresh, kernel_sep, iterations=4)
+
+        # 5. Find Contours
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        valid_boxes = []
+
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            
+            # Filter A: Aspect Ratio (Must be Vertical: Width < Height)
+            if w >= h:
+                continue
+
+            # Filter B: Minimum Height
+            if h < (img_h * min_height_ratio):
+                continue
+
+            # Restore padding
+            x_new = max(0, x - padding)
+            y_new = max(0, y - padding)
+            w_new = min(img_w - x_new, w + (padding * 2))
+            h_new = min(img_h - y_new, h + (padding * 2))
+            
+            valid_boxes.append((x_new, y_new, w_new, h_new))
+
+        print(f"Detected {len(valid_boxes)} vertical photos.")
+
+        if not valid_boxes:
+            print("No valid photos found based on current filters.")
+            return []
+
+        # 6. Sort Grid (Top-Left to Bottom-Right)
+        # Sort by Y first
+        valid_boxes.sort(key=lambda b: b[1]) 
+        
+        rows = []
+        if valid_boxes:
+            current_row = [valid_boxes[0]]
+            # Tolerance for what constitutes the "same row"
+            row_tolerance = valid_boxes[0][3] // 2 
+            
+            for i in range(1, len(valid_boxes)):
+                box = valid_boxes[i]
+                prev_box = current_row[-1]
+                
+                if abs(box[1] - prev_box[1]) < row_tolerance:
+                    current_row.append(box)
+                else:
+                    # Sort the finished row by X
+                    current_row.sort(key=lambda b: b[0]) 
+                    rows.append(current_row)
+                    current_row = [box]
+            
+            # Append final row
+            current_row.sort(key=lambda b: b[0])
+            rows.append(current_row)
+        
+        sorted_boxes = [box for row in rows for box in row]
+
+        # 7. Crop and Save to Temp Directory
+        output_paths = []
+        temp_dir = tempfile.mkdtemp()
+
+        for i, (x, y, w, h) in enumerate(sorted_boxes):
+            crop = img[y:y+h, x:x+w]
+            
+            out_filename = f"photo_{i+1:03d}.jpg"
+            out_path = os.path.join(temp_dir, out_filename)
+            
+            cv2.imwrite(out_path, crop)
+            output_paths.append(Path(out_path))
+            print(f"Processed: {out_filename}")
+
+        # Replicate automatically handles uploading these Paths and returning URLs
+        return output_paths
