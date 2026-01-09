@@ -1,4 +1,3 @@
-# predict.py
 import cv2
 import numpy as np
 import os
@@ -20,8 +19,6 @@ class Predictor(BasePredictor):
             resp = requests.get(url, stream=True)
             resp.raise_for_status()
             
-            # Create a temp file
-            # We try to keep the extension from the url if possible, default to .jpg
             parsed = urlparse(url)
             ext = os.path.splitext(parsed.path)[1]
             if not ext:
@@ -35,6 +32,50 @@ class Predictor(BasePredictor):
             return tmp_file.name
         except Exception as e:
             raise ValueError(f"Failed to download image from {url}: {e}")
+
+    def filter_overlaps(self, boxes: List[tuple], overlap_thresh: float = 0.3) -> List[tuple]:
+        """
+        Removes boxes that overlap significantly with larger boxes.
+        Standard Non-Maximum Suppression (NMS) logic.
+        """
+        if not boxes:
+            return []
+
+        # Sort boxes by area (Largest to Smallest)
+        # We want to keep the largest "parent" box and remove small fragments inside it
+        boxes = sorted(boxes, key=lambda b: b[2] * b[3], reverse=True)
+        
+        keep = []
+        
+        for current_box in boxes:
+            cx, cy, cw, ch = current_box
+            current_area = cw * ch
+            is_redundant = False
+            
+            for kept_box in keep:
+                kx, ky, kw, kh = kept_box
+                
+                # Calculate Intersection
+                x_left = max(cx, kx)
+                y_top = max(cy, ky)
+                x_right = min(cx + cw, kx + kw)
+                y_bottom = min(cy + ch, ky + kh)
+                
+                if x_right > x_left and y_bottom > y_top:
+                    intersection_area = (x_right - x_left) * (y_bottom - y_top)
+                    
+                    # Calculate Intersection over Union (IoU) or Intersection over Smaller Area
+                    # Here we check how much of the CURRENT (smaller) box is covered by the KEPT (larger) box
+                    coverage = intersection_area / current_area
+                    
+                    if coverage > overlap_thresh:
+                        is_redundant = True
+                        break
+            
+            if not is_redundant:
+                keep.append(current_box)
+                
+        return keep
 
     def predict(
         self,
@@ -56,9 +97,6 @@ class Predictor(BasePredictor):
             default=6
         )
     ) -> List[Path]:
-        """
-        Download image from URL, detect vertical photos, and return cropped paths.
-        """
         
         # 1. Download Image
         if not image_url or image_url == "null":
@@ -78,26 +116,27 @@ class Predictor(BasePredictor):
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
             # 4. Inverse Thresholding
-            # Background (>threshold) becomes Black. Photos (<threshold) become White.
             _, thresh = cv2.threshold(gray, threshold_value, 255, cv2.THRESH_BINARY_INV)
 
             # 5. Morphological Clean-up
-            kernel_fill = np.ones((3, 3), np.uint8)
-            thresh = cv2.dilate(thresh, kernel_fill, iterations=2)
+            # INCREASED DILATION: Helps merge broken parts of a single photo
+            kernel_fill = np.ones((5, 5), np.uint8) 
+            thresh = cv2.dilate(thresh, kernel_fill, iterations=3)
             
             kernel_sep = np.ones((3, 3), np.uint8)
-            thresh = cv2.erode(thresh, kernel_sep, iterations=4)
+            thresh = cv2.erode(thresh, kernel_sep, iterations=2)
 
             # 6. Find Contours
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            valid_boxes = []
+            initial_boxes = []
 
             for cnt in contours:
                 x, y, w, h = cv2.boundingRect(cnt)
                 
                 # Filter A: Aspect Ratio (Must be Vertical: Width < Height)
-                if w >= h:
+                # Relaxed slightly to <= to catch perfect squares if needed, but strictly vertical is safer
+                if w > h: 
                     continue
 
                 # Filter B: Minimum Height
@@ -110,9 +149,12 @@ class Predictor(BasePredictor):
                 w_new = min(img_w - x_new, w + (padding * 2))
                 h_new = min(img_h - y_new, h + (padding * 2))
                 
-                valid_boxes.append((x_new, y_new, w_new, h_new))
+                initial_boxes.append((x_new, y_new, w_new, h_new))
 
-            print(f"Detected {len(valid_boxes)} vertical photos.")
+            # --- NEW STEP: Filter Duplicates/Overlaps ---
+            valid_boxes = self.filter_overlaps(initial_boxes, overlap_thresh=0.3)
+
+            print(f"Detected {len(valid_boxes)} unique vertical photos (filtered from {len(initial_boxes)} raw detections).")
 
             if not valid_boxes:
                 print("No valid photos found based on current filters.")
@@ -142,7 +184,7 @@ class Predictor(BasePredictor):
             
             sorted_boxes = [box for row in rows for box in row]
 
-            # 8. Crop and Save to Temp Directory
+            # 8. Crop and Save
             output_paths = []
             output_dir = tempfile.mkdtemp()
 
@@ -159,6 +201,5 @@ class Predictor(BasePredictor):
             return output_paths
 
         finally:
-            # Clean up the downloaded input file
             if os.path.exists(local_img_path):
                 os.remove(local_img_path)
